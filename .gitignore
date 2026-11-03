@@ -1,0 +1,14 @@
+node_modules
+.env
+data/
+*.png
+!assets/*.png
+!assets/grades/*.png
+!assets/plates/*.png
+*.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+work/
+playwright-report/
+test-results/

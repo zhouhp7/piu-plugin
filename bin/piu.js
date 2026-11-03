@@ -1,0 +1,129 @@
+#!/usr/bin/env node
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import path from 'node:path';
+import { createInterface } from 'node:readline/promises';
+import { loadConfig, loadRankingConfig, ROOT } from '../src/config.js';
+import { createRankingService } from '../src/ranking-service.js';
+import { renderBest50 } from '../src/render.js';
+import { parsePumbility } from '../src/parser.js';
+import { createService } from '../src/service.js';
+import { BrowserManager } from '../src/browser.js';
+import { readProfile, piuOnlyState } from '../src/client.js';
+import { Vault } from '../src/vault.js';
+import QRCode from 'qrcode';
+
+const [command, ...args] = process.argv.slice(2);
+async function save(file, data) {
+  await mkdir(path.dirname(path.resolve(file)), {recursive: true});
+  await writeFile(file, data);
+  console.log(`已写入 ${path.resolve(file)}`);
+}
+async function main() {
+  if (command === 'setup') {
+    let template = await readFile(path.join(ROOT, '.env.example'), 'utf8');
+    template = template.replace('REPLACE_WITH_64_HEX_CHARACTERS', randomBytes(32).toString('hex'));
+    await writeFile(path.join(ROOT, '.env'), template, {flag: 'wx', mode: 0o600});
+    console.log('已创建 .env。部署前将 PIU_PUBLIC_URL 改为自己的 HTTPS 域名。');
+    return;
+  }
+  if (command === 'render') {
+    if (!args[0]) throw new Error('用法: render <profile.json> [output.png]');
+    const input = JSON.parse(await readFile(args[0], 'utf8'));
+    await save(args[1] || 'best50.png', await renderBest50(input));
+    return;
+  }
+  if (command === 'parse') {
+    if (!args[0]) throw new Error('用法: parse <pumbility.html> [profile.json]');
+    const profile = parsePumbility(await readFile(args[0], 'utf8'));
+    await save(args[1] || 'profile.json', JSON.stringify(profile, null, 2) + '\n');
+    return;
+  }
+  if (command === 'login-local') {
+    const config = loadConfig();
+    const browser = new BrowserManager({...config, headless: false});
+    const rl = createInterface({input: process.stdin, output: process.stdout});
+    try {
+      const {context, page} = await browser.createLogin();
+      await rl.question('请在打开的官方网页中完成登录，然后回到终端按回车。');
+      const profile = await readProfile(page, {paginate: false});
+      const vault = new Vault({directory: path.join(config.dataDir, 'sessions'), key: config.key});
+      await vault.save(args[0] || 'local', {state: piuOnlyState(await context.storageState()), savedAt: Date.now()});
+      console.log(`已保存 ${profile.playerName} 的会话。运行 node bin/piu.js fetch ${args[0] || 'local'}`);
+    } finally { rl.close(); await browser.close(); }
+    return;
+  }
+  if (command === 'rank-login-local') {
+    const config = loadRankingConfig();
+    const browser = new BrowserManager({...config, headless: false});
+    const ranking = createRankingService(config);
+    const rl = createInterface({input: process.stdin, output: process.stdout});
+    try {
+      const {context} = await browser.createLogin();
+      await rl.question('请在独立窗口完成官网登录，再回到终端按回车（此会话用于每日排行榜采集）。');
+      const snapshot = await ranking.setSession(await context.storageState());
+      console.log(`排行榜会话已加密保存，已取得 ${snapshot.count} 条真实记录。`);
+      if (config.jacketPrefetchPages) console.log(JSON.stringify(await ranking.prewarm({onlyIfEmpty: true}), null, 2));
+    } finally { rl.close(); await ranking.close(); await browser.close(); }
+    return;
+  }
+  if (['rank-capture', 'rank-daemon', 'rank-dates', 'rank-follow', 'rank-unfollow', 'rank', 'rank-preview', 'rank-prefetch', 'rank-audit'].includes(command)) {
+    const ranking = createRankingService(loadRankingConfig());
+    try {
+      if (command === 'rank-capture') console.log(JSON.stringify(await ranking.capture(), null, 2));
+      if (command === 'rank-dates') console.log(JSON.stringify(ranking.status(), null, 2));
+      if (command === 'rank-audit') console.log(JSON.stringify(ranking.latestAudit(), null, 2));
+      if (command === 'rank-prefetch') console.log(JSON.stringify(await ranking.prewarm(), null, 2));
+      if (command === 'rank-follow' || command === 'rank-unfollow') {
+        const owner = args[0] || 'local';
+        const input = args.slice(1).join(' ');
+        const result = input ? await ranking[command === 'rank-follow' ? 'follow' : 'unfollow'](owner, input) : ranking.listFollows(owner);
+        console.log(JSON.stringify(result, null, 2));
+      }
+      if (command === 'rank') {
+        const [owner = 'local', first, second, output = 'rank.png'] = args;
+        await save(output, await ranking.rank(owner, first, second));
+      }
+      if (command === 'rank-preview') await save(args[2] || 'rank-current.png', await ranking.preview(args[0] || 'local', args[1]));
+      if (command === 'rank-daemon') {
+        ranking.start({keepAlive: true});
+        console.log(`排行榜采集器已启动；下一次 01:00 GMT+8 对应 ${ranking.status().nextCaptureAt}。Ctrl+C 停止。`);
+        await new Promise(resolve => {process.once('SIGINT', resolve); process.once('SIGTERM', resolve);});
+      }
+    } finally { await ranking.close(); }
+    return;
+  }
+  if (command === 'fetch') {
+    const service = await createService(loadConfig());
+    try { await save(args[1] || 'best50.png', await service.best50(args[0] || 'local', args.slice(2).join(' '))); }
+    finally { await service.close(); }
+    return;
+  }
+  if (command === 'ids' || command === 'list') {
+    const service = await createService(loadConfig());
+    try {
+      const rows = await service.gameIds(args[0] || 'local');
+      console.log(JSON.stringify(rows.map(row => ({gameId: `${row.gameId}${row.tag}`, pumbility: row.pumbility, recordCount: row.recordCount, selected: row.selected})), null, 2));
+    }
+    finally { await service.close(); }
+    return;
+  }
+  if (command === 'serve') {
+    const config = loadConfig();
+    const service = await createService(config);
+    try {
+      const ticket = await service.login(args[0] || 'local');
+      await save('login-qr.png', await QRCode.toBuffer(ticket.url, {width: 600}));
+      console.log(`扫码打开独立官网登录窗口（非官方扫码授权）：\n${ticket.url}`);
+      console.log('完成绑定后，停止此进程，再运行 node bin/piu.js fetch。Ctrl+C 停止。');
+      await new Promise(resolve => { process.once('SIGINT', resolve); process.once('SIGTERM', resolve); });
+    } finally { await service.close(); }
+    return;
+  }
+  console.log('PIU Best50 / 排行榜\n  npm run setup\n  node bin/piu.js render profile.json out.png\n  node bin/piu.js parse pumbility.html profile.json\n  node bin/piu.js login-local [user]\n  node bin/piu.js serve [user]\n  node bin/piu.js list [user]\n  node bin/piu.js fetch [user] [out.png] [名称#标签，如 ZANTING#9403]\n  node bin/piu.js rank-login-local\n  node bin/piu.js rank-capture | rank-daemon | rank-dates | rank-audit | rank-prefetch\n  node bin/piu.js rank-follow owner SHAWN#1477 YINYBEST#3231 CHIPHANT#5633\n  node bin/piu.js rank-unfollow owner SHAWN#1477\n  node bin/piu.js rank owner [YYYYMMDD YYYYMMDD] [out.png]\n  node bin/piu.js rank-preview owner [YYYYMMDD] [out.png]\n  未指定 B50 档案时生成首个档案；不接受纯名称、纯标签或 uid。');
+}
+main().catch(error => {
+  // Never dump browser errors, request bodies, cookies or URLs with session identifiers.
+  console.error(error.code === 'EEXIST' ? '.env 已存在，保留原密钥。' : (error.code && error.name === 'PiuError' ? error.message : '操作失败，请检查命令参数、.env 配置、浏览器安装及网络。'));
+  process.exitCode = 1;
+});

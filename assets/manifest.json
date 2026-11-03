@@ -1,0 +1,293 @@
+{
+  "source": "PIU official website; original image bytes preserved without modification.",
+  "assets": [
+    {
+      "kind": "grades",
+      "code": "A",
+      "file": "grades/a.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/a.png",
+      "sha256": "d33e808f0e4511ab803c404a2844a58655f24aa895b9f8b18d618f7c9632315d",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "A+",
+      "file": "grades/a_p.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/a_p.png",
+      "sha256": "f1927afdddd86fc5afbf9f8466961fd08247ce094f8ff592afd47fc9896c168b",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "AA",
+      "file": "grades/aa.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/aa.png",
+      "sha256": "e431a1c7f200a0e26a5aa527006012bdc45af36bb398af7abcd2b3a8bd06df9c",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "AA+",
+      "file": "grades/aa_p.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/aa_p.png",
+      "sha256": "9ac7d7c8df8b63d9f4d7a6f497ea1b5a7026353ef261e0279ec549f9f6c2786b",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "AAA",
+      "file": "grades/aaa.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/aaa.png",
+      "sha256": "65eaf3003271122b2e756e6a17930d2de4100f29c35724db85d5a5faee87c44a",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "AAA+",
+      "file": "grades/aaa_p.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/aaa_p.png",
+      "sha256": "8e8946aaef6fc04c0c20da9c71fad6329046386da26bd0dff3f8c75fa27b7b3d",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "S",
+      "file": "grades/s.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/s.png",
+      "sha256": "1afc1940baa3145000149e11a634283256872bdfa1a4333992ef324ba15c1dc8",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "S+",
+      "file": "grades/s_p.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/s_p.png",
+      "sha256": "74eadb7d5ebcd06a5b1beb3883990e67cee36a456ad5466e20e1975742a7ddf5",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "SS",
+      "file": "grades/ss.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/ss.png",
+      "sha256": "fb7d105bf0730b16da1ea2005128cd99b8ba272012c53da19ab0c18ae8d26143",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "SS+",
+      "file": "grades/ss_p.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/ss_p.png",
+      "sha256": "c4256bf733dba62825a39c1a6f14386703af97f7a30c52bf3806a4caa1a8a534",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "SSS",
+      "file": "grades/sss.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/sss.png",
+      "sha256": "b4b1f2332c765d0a5d008bfb12a68e5c3c952672799e53c3ce8def23ad587aa3",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "SSS+",
+      "file": "grades/sss_p.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/sss_p.png",
+      "sha256": "65baa9f2435a0f39ac4f3dcdd62070d59793a2950da203f47c08de7eabd98994",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "X_A",
+      "file": "grades/x_a.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/x_a.png",
+      "sha256": "a7e1c8de2e6d0d7405700aa937a702be0bcee1019e3a0b87f7d5de74efea6b81",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "X_A+",
+      "file": "grades/x_a_p.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/x_a_p.png",
+      "sha256": "caead9473d9fb45c279578df8bf330c2d8b673fd26a61efadece9170cc8e6e65",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "X_AA",
+      "file": "grades/x_aa.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/x_aa.png",
+      "sha256": "69a15bd881f4dcaffafd83bee8cdc12a7f1fa975d3e8ab83f69ac0742c0a119c",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "X_AA+",
+      "file": "grades/x_aa_p.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/x_aa_p.png",
+      "sha256": "fd1e5df4c90dc19e90d57703bc05017c074e2de6bd550da9f599498984253365",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "X_AAA",
+      "file": "grades/x_aaa.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/x_aaa.png",
+      "sha256": "da112e18f219253aa75c9cdaa04ea0852bf7c960314c81888d623f885a61085c",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "X_AAA+",
+      "file": "grades/x_aaa_p.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/x_aaa_p.png",
+      "sha256": "3d5ac18d1432220f9284c4a718167f0b81229291b046e18a213d484e5f189df4",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "X_S",
+      "file": "grades/x_s.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/x_s.png",
+      "sha256": "3fd3bf224c2c5e30a05faff8844def53161820e5dfade4d7b70059dcf9d39e6f",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "X_S+",
+      "file": "grades/x_s_p.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/x_s_p.png",
+      "sha256": "ebef0d16701f3a81bf5077ec4cfc0d373d53e9ceb10567f3a5e9e771333c378d",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "X_SS",
+      "file": "grades/x_ss.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/x_ss.png",
+      "sha256": "7baed90d39b9712c4980ae935bdafb261ea2370c83ee70f24f72c21955fd01d2",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "X_SS+",
+      "file": "grades/x_ss_p.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/x_ss_p.png",
+      "sha256": "b97707661315c39c603be51b0f67d4a53c84a5537889d08921b5290c9e67f396",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "X_SSS",
+      "file": "grades/x_sss.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/x_sss.png",
+      "sha256": "e18397ee597948970736714cea7569d53799f65d1c6775b55d9860740ed6d823",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "X_SSS+",
+      "file": "grades/x_sss_p.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/x_sss_p.png",
+      "sha256": "39854ac7930477095fe9a3543a695e9a23ed680f82316cdb1fd510f7e6b359e2",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "plates",
+      "code": "RG",
+      "file": "plates/s_rg.png",
+      "source": "https://www.piugame.com/l_img/plate/s_rg.png",
+      "sha256": "2df781f049b02878cef7487beb19a674c43e320c71a3fefc3b395f1d86245a20",
+      "width": 100,
+      "height": 50
+    },
+    {
+      "kind": "plates",
+      "code": "FG",
+      "file": "plates/s_fg.png",
+      "source": "https://www.piugame.com/l_img/plate/s_fg.png",
+      "sha256": "fa19cbeb395c4d6dcb469a89d449f5047117bef341fac34605b8b5be09b36910",
+      "width": 100,
+      "height": 50
+    },
+    {
+      "kind": "plates",
+      "code": "TG",
+      "file": "plates/s_tg.png",
+      "source": "https://www.piugame.com/l_img/plate/s_tg.png",
+      "sha256": "9bda3cd7849040c930700baf2bf36ed9962b1747ddeb4a232fa686220eede8f0",
+      "width": 100,
+      "height": 50
+    },
+    {
+      "kind": "plates",
+      "code": "MG",
+      "file": "plates/s_mg.png",
+      "source": "https://www.piugame.com/l_img/plate/s_mg.png",
+      "sha256": "632b6e6f9793761b9108aaf61cf40c2acba5a78bcc9a074840eb68c9660a060d",
+      "width": 100,
+      "height": 50
+    },
+    {
+      "kind": "plates",
+      "code": "SG",
+      "file": "plates/s_sg.png",
+      "source": "https://www.piugame.com/l_img/plate/s_sg.png",
+      "sha256": "f3f24544ef5f04443ac852f209b4395529e07c000f532c071114f58e04b2a005",
+      "width": 100,
+      "height": 50
+    },
+    {
+      "kind": "plates",
+      "code": "EG",
+      "file": "plates/s_eg.png",
+      "source": "https://www.piugame.com/l_img/plate/s_eg.png",
+      "sha256": "787b4725c218e6ee6f3296b995a3ce897817f917390f683687c92ee8057449dd",
+      "width": 100,
+      "height": 50
+    },
+    {
+      "kind": "plates",
+      "code": "UG",
+      "file": "plates/s_ug.png",
+      "source": "https://www.piugame.com/l_img/plate/s_ug.png",
+      "sha256": "b67b5a113a309cba28db30bf6a07070bc25237b553fd3cd7f84e8eeafb9b3658",
+      "width": 100,
+      "height": 50
+    },
+    {
+      "kind": "plates",
+      "code": "PG",
+      "file": "plates/s_pg.png",
+      "source": "https://www.piugame.com/l_img/plate/s_pg.png",
+      "sha256": "538de04a2a33c63098c35c7542b2bbb96e785cab33d021059ddffa34051082a5",
+      "width": 100,
+      "height": 50
+    }
+  ]
+}
