@@ -3,7 +3,7 @@ import { loadBadgeAssets } from './assets.js';
 import { normalizeProfile } from './model.js';
 
 export const CARD_WIDTH = 600;
-export const CARD_HEIGHT = 150;
+export const CARD_HEIGHT = 260;
 const GRID_COLUMNS = 5;
 const GRID_ROWS = 10;
 const GRID_GAP = 20;
@@ -185,13 +185,14 @@ function drawBackground(ctx) {
 }
 
 function drawHeader(ctx, profile, images, family) {
-  fitText(ctx, 'PIU  /  PERSONAL PERFORMANCE', 80, 67, 1200, 23, COLORS.cyan, 700, family);
+  const recent = profile.kind === 'recent';
+  fitText(ctx, recent ? 'PIU  /  RECENTLY PLAYED' : 'PIU  /  PERSONAL PERFORMANCE', 80, 67, 1200, 23, COLORS.cyan, 700, family);
   ctx.textAlign = 'right';
-  fitText(ctx, profile.demo ? 'FABRICATED DEMO DATA' : 'PIUGAME.COM  /  MY PUMBILITY', IMAGE_WIDTH - 80, 67, 850, 21,
+  fitText(ctx, profile.demo ? 'FABRICATED DEMO DATA' : recent ? 'PIUGAME.COM  /  RECENTLY PLAYED' : 'PIUGAME.COM  /  MY PUMBILITY', IMAGE_WIDTH - 80, 67, 850, 21,
     profile.demo ? '#ffb88c' : COLORS.muted, 700, family);
   ctx.textAlign = 'left';
-  fitText(ctx, 'PUMBILITY', 76, 162, 1130, 90, COLORS.light, 900, family);
-  fitText(ctx, 'BEST 50', 706, 162, 1000, 90, COLORS.cyan, 900, family);
+  fitText(ctx, recent ? 'RECENT' : 'PUMBILITY', 76, 162, 1130, 90, COLORS.light, 900, family);
+  fitText(ctx, recent ? '50 PLAYS' : 'BEST 50', recent ? 530 : 706, 162, recent ? 580 : 1000, recent ? 76 : 90, COLORS.cyan, 900, family);
 
   const infoX = 1150;
   const gradient = ctx.createLinearGradient(infoX, 84, IMAGE_WIDTH - 80, 192);
@@ -207,8 +208,8 @@ function drawHeader(ctx, profile, images, family) {
 
   ctx.strokeStyle = '#42546a'; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(totalX - 42, 106); ctx.lineTo(totalX - 42, 170); ctx.stroke();
-  fitText(ctx, 'TOTAL PUMBILITY', totalX, 116, 445, 17, COLORS.muted, 700, family);
-  fitText(ctx, formatNumber(profile.pumbility, 3), totalX - 4, 166, 450, 52, COLORS.cyan, 700, family);
+  fitText(ctx, recent ? 'RECENT RECORDS' : 'TOTAL PUMBILITY', totalX, 116, 445, 17, COLORS.muted, 700, family);
+  fitText(ctx, formatNumber(recent ? profile.records.length : profile.pumbility, 3), totalX - 4, 166, 450, 52, COLORS.cyan, 700, family);
   if (profile.ranking) {
     const rankingX = 2760;
     ctx.beginPath(); ctx.moveTo(rankingX - 40, 106); ctx.lineTo(rankingX - 40, 170); ctx.stroke();
@@ -229,12 +230,22 @@ function drawHeader(ctx, profile, images, family) {
 
 function drawRating(ctx, value, x, y, maxWidth, color, family) {
   const output = formatNumber(value, 3);
-  let size = 64;
+  let size = 80;
   font(ctx, size, 700, family);
   while (ctx.measureText(output).width > maxWidth && size > 32) font(ctx, --size, 700, family);
   ctx.fillStyle = color;
   ctx.fillText(output, x, y, maxWidth);
   return Math.min(maxWidth, ctx.measureText(output).width);
+}
+
+const PLAY_TIME = new Intl.DateTimeFormat('en-CA', {timeZone: 'Asia/Shanghai', year: 'numeric',
+  month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'});
+function playedTime(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '—';
+  const parts = Object.fromEntries(PLAY_TIME.formatToParts(date).map(part => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} GMT+8`;
 }
 
 function drawLevel(ctx, record, centerX, centerY, family) {
@@ -247,14 +258,14 @@ function drawLevel(ctx, record, centerX, centerY, family) {
   ctx.restore();
 }
 
-function drawCard(ctx, record, slot, x, y, images, badges, family, isDemo) {
+function drawCard(ctx, record, slot, x, y, images, badges, family, isDemo, recent) {
   const w = CARD_WIDTH; const h = CARD_HEIGHT;
   if (!record) {
     panel(ctx, x, y, w, h, 16, '#101827', '#243044');
     fitText(ctx, `#${String(slot + 1).padStart(2, '0')}`, x + 18, y + 33, 100, 20, '#415169', 700, family);
     ctx.textAlign = 'center';
-    fitText(ctx, 'NO RECORD', x + w / 2, y + 88, w - 30, 23, '#617188', 700, family);
-    fitText(ctx, 'Not available on the source page', x + w / 2, y + 118, w - 35, 16, '#526077', 400, family);
+    fitText(ctx, 'NO RECORD', x + w / 2, y + h / 2 + 8, w - 30, 23, '#617188', 700, family);
+    fitText(ctx, 'Not available on the source page', x + w / 2, y + h / 2 + 38, w - 35, 16, '#526077', 400, family);
     ctx.textAlign = 'left';
     return;
   }
@@ -267,40 +278,56 @@ function drawCard(ctx, record, slot, x, y, images, badges, family, isDemo) {
   ctx.fillStyle = accent; ctx.fillRect(x, y, w, 3);
   ctx.restore();
 
-  fitText(ctx, `#${String(record.rank).padStart(2, '0')}`, x + 17, y + 33, 57, 20, '#b4c7df', 700, family);
-  fitText(ctx, record.title, x + 79, y + 33, w - 97, 23, COLORS.light, 700, family);
-  if (!imageCover(ctx, images.get(record.jacket), x + 17, y + 47, 92, 92)) {
-    placeholder(ctx, x + 17, y + 47, 92, record.title, isDemo, family);
+  const jacketSize = h - 24;
+  const detailsX = x + jacketSize + 24;
+  const detailsWidth = w - (detailsX - x) - 12;
+  if (!imageCover(ctx, images.get(record.jacket), x + 12, y + 12, jacketSize, jacketSize, 12)) {
+    placeholder(ctx, x + 12, y + 12, jacketSize, record.title, isDemo, family);
   }
 
-  fitText(ctx, 'PUMBILITY', x + 130, y + 62, 224, 12, '#9eb1cb', 700, family);
-  drawRating(ctx, record.rating, x + 127, y + 119, 224, accent, family);
+  fitText(ctx, `#${String(record.rank).padStart(2, '0')} ${record.title}`,
+    detailsX, y + 43, detailsWidth, 24, COLORS.light, 700, family);
+  ctx.strokeStyle = '#465870'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(detailsX, y + 60); ctx.lineTo(detailsX + detailsWidth, y + 60); ctx.stroke();
+  if (recent && record.stageBreak) {
+    fitText(ctx, 'STAGE BREAK', detailsX, y + 133, detailsWidth, 33, '#ff8a94', 700, family);
+  } else {
+    drawRating(ctx, recent ? record.score : record.rating, detailsX - 2, y + (recent ? 137 : 150), detailsWidth - 4, accent, family);
+  }
+  if (recent) fitText(ctx, playedTime(record.playedAt), detailsX, y + 165, detailsWidth, 16, COLORS.muted, 400, family);
+
+  const badgesY = y + h - 84;
+  const badgeBackground = ctx.createLinearGradient(detailsX, badgesY, detailsX + detailsWidth, badgesY + 72);
+  badgeBackground.addColorStop(0, '#293d57'); badgeBackground.addColorStop(1, '#223047');
+  panel(ctx, detailsX, badgesY, detailsWidth, 72, 12, badgeBackground, '#3b526f');
   const grade = record.grade.toUpperCase();
   const gradeKey = record.failed ? `X_${grade}` : grade;
   const gradeImage = badges.grades.get(gradeKey) ?? badges.grades.get(record.gradeCode?.toUpperCase()) ?? badges.grades.get(grade);
   const plateImage = badges.plates.get(record.plate?.toUpperCase());
-  // Keep the three icon slots anchored to the card's right edge, independent
-  // of how many decimal digits the source score contains.
-  const gradeX = x + w - 237;
-  const plateX = gradeX + 66 + 12;
-  if (!imageContain(ctx, gradeImage, gradeX, y + 74, 66, 42)) {
-    fitText(ctx, '—', gradeX + 17, y + 105, 48, 25, '#c1d1e6', 700, family);
+  // Fixed slots keep Grade, Plate and level aligned regardless of score width.
+  const gradeX = detailsX + 12;
+  const plateX = detailsX + 128;
+  if (!imageContain(ctx, gradeImage, gradeX, badgesY + 4, 108, 64)) {
+    fitText(ctx, '—', gradeX + 42, badgesY + 45, 48, 25, '#c1d1e6', 700, family);
   }
-  if (!imageContain(ctx, plateImage, plateX, y + 74, 78, 42)) {
-    fitText(ctx, '—', plateX + 22, y + 105, 48, 25, '#c1d1e6', 700, family);
+  if (!imageContain(ctx, plateImage, plateX, badgesY + 9, 108, 54)) {
+    fitText(ctx, '—', plateX + 42, badgesY + 45, 48, 25, '#c1d1e6', 700, family);
   }
-  drawLevel(ctx, record, plateX + 78 + 16 + 23, y + 95, family);
+  drawLevel(ctx, record, detailsX + detailsWidth - 38, badgesY + 36, family);
 }
 
 function drawFooter(ctx, profile, family) {
+  const recent = profile.kind === 'recent';
   ctx.fillStyle = '#354258'; ctx.fillRect(80, FOOTER_LINE, IMAGE_WIDTH - 160, 1);
   fitText(ctx, profile.demo
     ? 'DEMO ONLY  /  Names, scores and ratings are fabricated. Jackets are procedural; grade and plate badges are official assets.'
-    : 'SOURCE  /  piugame.com/my_page/pumbility.php  ·  Official order preserved  ·  Missing values shown as —',
+    : recent
+      ? 'SOURCE  /  piugame.com/my_page/recently_played.php  ·  Game scores  ·  Newest first  ·  Times: GMT+8'
+      : 'SOURCE  /  piugame.com/my_page/pumbility.php  ·  Official order preserved  ·  Missing values shown as —',
   80, FOOTER_LINE + 34, IMAGE_WIDTH - 160, 18, profile.demo ? '#ffb88c' : COLORS.muted, 400, family);
   fitText(ctx, `UPDATED  /  ${profile.updatedAt ?? 'Not provided by source'}`, 80, FOOTER_LINE + 63, 1450, 17, '#6d809b', 400, family);
   ctx.textAlign = 'right';
-  fitText(ctx, 'PIU BEST50  /  COMMUNITY TOOL  ·  NOT AFFILIATED WITH ANDAMIRO', IMAGE_WIDTH - 80, FOOTER_LINE + 63, 1120, 15, '#6d809b', 400, family);
+  fitText(ctx, `PIU ${recent ? 'RECENT' : 'BEST50'}  /  COMMUNITY TOOL  ·  NOT AFFILIATED WITH ANDAMIRO`, IMAGE_WIDTH - 80, FOOTER_LINE + 63, 1120, 15, '#6d809b', 400, family);
   ctx.textAlign = 'left';
 }
 
@@ -329,10 +356,15 @@ export async function renderBest50(input, options = {}) {
   drawHeader(ctx, profile, images, family);
   for (let slot = 0; slot < GRID_COLUMNS * GRID_ROWS; slot += 1) {
     drawCard(ctx, profile.records[slot], slot, PAGE_MARGIN + (slot % GRID_COLUMNS) * (CARD_WIDTH + GRID_GAP),
-      GRID_TOP + Math.floor(slot / GRID_COLUMNS) * (CARD_HEIGHT + GRID_GAP), images, badges, family, profile.demo);
+      GRID_TOP + Math.floor(slot / GRID_COLUMNS) * (CARD_HEIGHT + GRID_GAP), images, badges, family, profile.demo, profile.kind === 'recent');
   }
   drawFooter(ctx, profile, family);
   return canvas.encode('png');
+}
+
+/** Recent plays use raw game scores and preserve repeated charts and play times. */
+export function renderRecent(input, options = {}) {
+  return renderBest50({...input, kind: 'recent'}, options);
 }
 
 export default renderBest50;

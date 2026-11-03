@@ -30,6 +30,7 @@ export class PiuBest50 extends plugin {
       rule: [{reg: '^#?(?:piu|PIU)\\s*(?:帮助|help)$', fnc: 'help'},
         {reg: '^#?(?:piu|PIU)\\s*(?:登录|登陆|绑定|login)$', fnc: 'login'},
         {reg: '^#?(?:piu|PIU)\\s*(?:b50|B50|best50|Best50)(?:\\s+[^@\\r\\n]{1,160})?\\s*$', fnc: 'best50'},
+        {reg: '^#?(?:piu|PIU)\\s*(?:recent|RECENT)(?:\\s+[^@\\r\\n]{1,160})?\\s*$', fnc: 'recent'},
         {reg: '^#?(?:piu|PIU)\\s*(?:list|LIST|账号|游戏ID|游戏id|ids|IDS)$', fnc: 'gameIds'},
         {reg: '^#?(?:piu|PIU)\\s*(?:ranklogin|RANKLOGIN)\\s*$', fnc: 'rankLogin', permission: 'master'},
         {reg: '^#?(?:piu|PIU)\\s*(?:rank|RANK)(?:\\s+[^\\r\\n]{1,80})?\\s*$', fnc: 'rank'},
@@ -57,6 +58,8 @@ export class PiuBest50 extends plugin {
       '私聊 #piu list：列出自己账号的全部档案、完整名称#标签及 Pumbility；别名：账号、游戏ID、ids。',
       '#piu b50：生成自己首个档案的 Pumbility Best50 图片；别名：best50。',
       '#piu b50 ZANTING#9403：指定自己账号内的完整名称#四位标签生成图片。',
+      '#piu recent：生成自己首个档案的最近游玩图片，最多 50 条，按官网从新到旧排列；重复游玩保留，显示游戏分数和 GMT+8 游玩时间。',
+      '#piu recent ZANTING#9403：查看自己账号内指定档案的最近游玩。',
       '#piu follow SHAWN#1477 YINYBEST#3231 CHIPHANT#5633：批量加入自己的关注列表。',
       '#piu unfollow SHAWN#1477 YINYBEST#3231：批量移出自己的关注列表。',
       '#piu follow / #piu unfollow：不带参数时查看自己的关注列表。',
@@ -84,6 +87,12 @@ export class PiuBest50 extends plugin {
     const selector = String(this.e.msg ?? this.e.raw_message ?? '').replace(/^#?piu\s*(?:b50|best50)/i, '').trim();
     if (/@|\[CQ:at(?:,|\])/.test(selector) || this.e.at && String(this.e.at) !== String(this.e.self_id ?? this.e.bot?.uin)) return this.reply('请填写自己账号的完整 名称#标签，例如 #piu b50 ZANTING#9403。');
     try { return await this.reply(image(await (await service()).best50(identity(this.e), selector))); }
+    catch (error) { return this.reply(publicError(error)); }
+  }
+  async recent() {
+    const selector = message(this.e).replace(/^#?piu\s*recent/i, '').trim();
+    if (/@|\[CQ:at(?:,|\])/.test(selector) || this.e.at && String(this.e.at) !== String(this.e.self_id ?? this.e.bot?.uin)) return this.reply('请填写自己账号的完整 名称#标签，例如 #piu recent ZANTING#9403。');
+    try { return await this.reply(image(await (await service()).recent(identity(this.e), selector))); }
     catch (error) { return this.reply(publicError(error)); }
   }
   async gameIds() {

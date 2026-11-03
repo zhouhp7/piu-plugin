@@ -54,12 +54,72 @@ function assetCode(src, folder) {
   return match?.[1]?.toUpperCase().replace(/_(?:PLUS|P)$/, '+') ?? '';
 }
 function imageUrl(root, baseUrl) {
-  const style = root.find('.top-wrap, .profile_img .re').first().attr('style') ?? '';
+  const style = root.find('.top-wrap, .profile_img .re, .in.bgfix').first().attr('style') ?? '';
   const raw = /url\(\s*['"]?([^)'"\s]+)['"]?\s*\)/i.exec(style)?.[1] ??
     root.find('.top-wrap img, .profile_img img').first().attr('src');
   if (!raw) return null;
   try { const url = new URL(raw, baseUrl); if (url.hostname === 'piugame.com') url.hostname = 'www.piugame.com'; return url.protocol === 'https:' ? url.href : null; }
   catch { return null; }
+}
+
+function recentPlayedAt(value) {
+  const source = clean(value);
+  const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})\s*\(GMT([+-])(\d{1,2})(?::(\d{2}))?\)$/i.exec(source);
+  if (!match) throw new PiuError('PAGE_CHANGED', '未能识别最近游玩的时间及其时区，请更新页面解析器。');
+  const [year, month, day, hour, minute, second] = match.slice(1, 7).map(Number);
+  const offsetHour = Number(match[8]);
+  const offsetMinute = Number(match[9] ?? 0);
+  const local = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  if (year < 1900 || year > 9999 || month < 1 || month > 12 || day < 1 ||
+      hour > 23 || minute > 59 || second > 59 || offsetHour > 14 || offsetMinute > 59 ||
+      (offsetHour === 14 && offsetMinute !== 0) || local.getUTCFullYear() !== year ||
+      local.getUTCMonth() !== month - 1 || local.getUTCDate() !== day) {
+    throw new PiuError('PAGE_CHANGED', '官网最近游玩时间无效，已停止生成。');
+  }
+  const sign = match[7] === '+' ? 1 : -1;
+  return new Date(local.getTime() - sign * (offsetHour * 60 + offsetMinute) * 60_000).toISOString();
+}
+
+/** The recent page contains up to 50 plays, including repeated charts. Scores
+ * here are raw game scores, not single-chart Pumbility contributions. */
+export function parseRecent(html, {baseUrl = 'https://www.piugame.com'} = {}) {
+  const $ = load(html);
+  const profile = $('.subProfile_wrap').first();
+  if ($('form#login_fs, input[name="mb_password"]').length && !profile.length) {
+    throw new PiuError('AUTH_REQUIRED', '登录已失效，请私聊发送 #piu 登录。');
+  }
+  if (!$('.recently_playe_wrap .recently_playeList').length || !profile.length) {
+    throw new PiuError('PAGE_CHANGED', '未识别到最近游玩页面，请检查登录状态或更新页面解析器。');
+  }
+  const playerName = normalizeGameIdSelector(profile.find('.name_w .t2, .profile_name .t2').first().text());
+  if (!playerName) throw new PiuError('PAGE_CHANGED', '最近游玩页面缺少档案标识，已停止生成。');
+  const records = [];
+  $('.recently_playeList > li').slice(0, 50).each((_, element) => {
+    const row = $(element);
+    const title = clean(row.find('.song_name p').first().text());
+    const scoreText = clean(row.find('.con2 .li_in.ac .tx').first().text());
+    const stageBreak = /^STAGE\s+BREAK$/i.test(scoreText);
+    const score = numeric(scoreText);
+    const gradeCode = assetCode(row.find('.con2 img[src*="/grade/"]').first().attr('src'), 'grade');
+    const failed = stageBreak || gradeCode.startsWith('X_');
+    const playedAtSource = clean(row.find('.recently_date_tt').first().text());
+    const step = chart(row);
+    const judgements = {};
+    for (const label of ['PERFECT', 'GREAT', 'GOOD', 'BAD', 'MISS']) {
+      judgements[label.toLowerCase()] = numeric(row.find(`td[data-th="${label}"] .tx`).first().text());
+    }
+    if (!title || (!stageBreak && (score === null || !Number.isInteger(score) || score > 1_000_000)) ||
+        Object.values(judgements).some(value => value === null || !Number.isInteger(value)) ||
+        step.mode === 'UNKNOWN' || step.level === null || (!gradeCode && !stageBreak)) {
+      throw new PiuError('PAGE_CHANGED', '最近游玩的成绩卡片数据不完整，已停止生成以避免错误或遗漏。');
+    }
+    records.push({rank: records.length + 1, title, ...step, score, rating: null,
+      grade: gradeCode.startsWith('X_') ? gradeCode.slice(2) : gradeCode, gradeCode, failed, stageBreak,
+      plate: assetCode(row.find('.con2 img[src*="/plate/"]').first().attr('src'), 'plate'),
+      jacket: imageUrl(row, baseUrl), playedAt: recentPlayedAt(playedAtSource), playedAtSource, judgements});
+  });
+  return {kind: 'recent', playerName, pumbility: null, ranking: null,
+    updatedAt: new Date().toISOString(), source: 'piugame.com', records};
 }
 function chart(root) {
   const ball = root.find('.stepBall_in').first();

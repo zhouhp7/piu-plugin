@@ -1,6 +1,6 @@
 import {readFile} from 'node:fs/promises';
 
-export const GRADE_CODES = Object.freeze(['A', 'A+', 'AA', 'AA+', 'AAA', 'AAA+', 'S', 'S+', 'SS', 'SS+', 'SSS', 'SSS+']);
+export const GRADE_CODES = Object.freeze(['C', 'B', 'A', 'A+', 'AA', 'AA+', 'AAA', 'AAA+', 'S', 'S+', 'SS', 'SS+', 'SSS', 'SSS+']);
 export const PLATE_CODES = Object.freeze(['RG', 'FG', 'TG', 'MG', 'SG', 'EG', 'UG', 'PG']);
 
 /** Fixed bundled paths: account data never selects a file or an asset URL. */

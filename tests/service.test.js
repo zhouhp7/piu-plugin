@@ -10,7 +10,7 @@ function gate() {
 const state = label => ({cookies: [{name: 'sid', domain: '.piugame.com', path: '/', value: label}], origins: []});
 async function fixture(t, overrides = {}) {
   const records = new Map([['owner', {state: state('old'), savedAt: Date.now()}]]);
-  const calls = {fetch: [], ids: 0, saves: [], deletes: []};
+  const calls = {fetch: [], recent: [], ids: 0, saves: [], deletes: []};
   let callbacks;
   const vault = {
     async load(key) { return structuredClone(records.get(key) ?? null); },
@@ -25,12 +25,18 @@ async function fixture(t, overrides = {}) {
       if (overrides.onFetch) await overrides.onFetch(gameId);
       return {profile: {label: `${saved.cookies[0].value}:${gameId || 'current'}`}, images: new Map(), state: saved};
     },
+    fetchRecent: async (_browser, saved, {gameId}) => {
+      calls.recent.push(gameId);
+      if (overrides.onRecent) await overrides.onRecent(gameId);
+      return {profile: {kind:'recent',label:`${saved.cookies[0].value}:${gameId || 'current'}`}, images:new Map(), state:saved};
+    },
     fetchGameIds: async (_browser, saved) => {
       calls.ids++;
       if (overrides.onIds) await overrides.onIds();
       return {gameIds: [{id: 'bound', uid: 'uid1', playerName: 'ZANTING#9403', gameId: 'ZANTING', tag: '#9403', selected: true, pumbility: 17841.83, recordCount: 50}], state: saved};
     },
     renderBest50: async profile => Buffer.from(profile.label),
+    renderRecent: async profile => Buffer.from(`recent:${profile.label}`),
   });
   t.after(() => service.close());
   return {service, records, calls, callbacks};
@@ -50,6 +56,37 @@ test('bare b50 uses first card and explicit selectors require complete name and 
   assert.strictEqual(await f.service.best50('owner'), first);
   assert.deepEqual(f.calls.fetch, ['', 'ZANTING#9403']);
   await assert.rejects(f.service.best50('another', 'ZANTING#9403'), {code: 'AUTH_REQUIRED'});
+});
+
+test('recent uses its own cache, validates full IDs, and requires a bound personal session', async t => {
+  const f = await fixture(t);
+  const best = await f.service.best50('owner');
+  const recent = await f.service.recent('owner');
+  assert.equal(recent.toString(), 'recent:old:current');
+  assert.strictEqual(await f.service.recent('owner'), recent);
+  assert.strictEqual(await f.service.best50('owner'), best);
+  assert.equal((await f.service.recent('owner','ZANTING#9403')).toString(), 'recent:old:ZANTING#9403');
+  assert.deepEqual(f.calls.recent, ['', 'ZANTING#9403']);
+  for (const selector of ['#9403','ZANTING','uid1']) await assert.rejects(f.service.recent('owner',selector), {code:'GAME_ID_FORMAT'});
+  await assert.rejects(f.service.recent('another'), {code:'AUTH_REQUIRED'});
+  await f.service.unbind('owner');
+  await assert.rejects(f.service.recent('owner'), {code:'AUTH_REQUIRED'});
+});
+
+test('recent shares the account-switch lock with B50 and merges identical in-flight recent requests', async t => {
+  const blocked = gate();
+  const f = await fixture(t, {onRecent:async()=>{blocked.start();await blocked.waiting;}});
+  await f.service.best50('owner');
+  const recent = f.service.recent('owner');
+  await blocked.ready;
+  const same = f.service.recent('owner');
+  await assert.rejects(f.service.best50('owner'), {code:'BUSY'});
+  await assert.rejects(f.service.gameIds('owner'), {code:'BUSY'});
+  await assert.rejects(f.service.recent('owner','ZANTING#9403'), {code:'BUSY'});
+  blocked.release();
+  const [left,right] = await Promise.all([recent,same]);
+  assert.strictEqual(left,right);
+  assert.deepEqual(f.calls.recent, ['']);
 });
 
 test('repeated bare b50 calls share an in-flight first-card request', async t => {

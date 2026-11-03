@@ -20,6 +20,7 @@ function harness() {
   const best50 = {
     async login(...args) {calls.push(['login', ...args]); return {url: 'https://bot.example/login/token', expiresAt: Date.now() + 300_000};},
     async best50(...args) {calls.push(['best50', ...args]); return Buffer.from('PNG');},
+    async recent(...args) {calls.push(['recent', ...args]); return Buffer.from('RECENT PNG');},
     async gameIds(...args) {calls.push(['gameIds', ...args]); return [{gameId:'SHAWN',tag:'#1477',playerName:'SHAWN#1477',uid:'uid1',selected:true,pumbility:19014.2,recordCount:50}];},
     async close() {calls.push(['bestClose']);},
   };
@@ -130,7 +131,7 @@ test('help covers every bot command, permissions, schedule and mandatory full id
   await app.help();
   const help = app.sent.at(-1);
   assert.match(help, /^#piu help/);
-  for (const command of ['#piu help', '#piu 帮助', '#piu 登录', '#piu list', '#piu b50', '#piu follow', '#piu unfollow', '#piu rank', '#piu 解绑', '#piu ranklogin']) {
+  for (const command of ['#piu help', '#piu 帮助', '#piu 登录', '#piu list', '#piu b50', '#piu recent', '#piu follow', '#piu unfollow', '#piu rank', '#piu 解绑', '#piu ranklogin']) {
     assert.ok(help.includes(command), `help must explain ${command}`);
   }
   for (const alias of ['登陆', '绑定', 'login', '账号', '游戏ID', 'ids', 'best50', '退出', 'logout']) assert.ok(help.includes(alias));
@@ -152,4 +153,23 @@ test('help covers every bot command, permissions, schedule and mandatory full id
   const helpRule = app.rule.find(rule => rule.fnc === 'help');
   assert.ok(new RegExp(helpRule.reg).test('#piu help'));
   assert.ok(new RegExp(helpRule.reg).test('#piu 帮助'));
+});
+
+test('recent command forwards the authenticated owner and optional full profile selector', async () => {
+  const {app,calls} = harness();
+  const rule = new RegExp(app.rule.find(rule => rule.fnc === 'recent').reg);
+  assert.ok(rule.test('#piu recent'));
+  assert.ok(rule.test('#piu recent ZANTING#9403'));
+  assert.equal(rule.test('#piu recently'), false);
+  app.e.msg = '#piu recent';
+  await app.recent();
+  app.e.msg = '#piu recent ZANTING#9403';
+  await app.recent();
+  assert.equal(calls.filter(row => row[0] === 'recent').length, 2);
+  assert.equal(calls.find(row => row[0] === 'recent')[1], '["default","456","123"]');
+  assert.equal(calls.find(row => row[0] === 'recent')[2], '');
+  assert.equal(calls.filter(row => row[0] === 'recent')[1][2], 'ZANTING#9403');
+  app.e.msg = '#piu recent @someone';
+  await app.recent();
+  assert.equal(calls.filter(row => row[0] === 'recent').length, 2);
 });

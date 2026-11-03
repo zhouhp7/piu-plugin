@@ -3,6 +3,24 @@
   "assets": [
     {
       "kind": "grades",
+      "code": "C",
+      "file": "grades/c.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/c.png",
+      "sha256": "1f70e78ead52d29888ccbaaca299c626c26e86eeff57b6113a1cf761b1288e0f",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "B",
+      "file": "grades/b.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/b.png",
+      "sha256": "1eec0714fdc5aec15e5b0b1d91ad7fc720d6c9f64ef44e32e52d3e8f1888829b",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
       "code": "A",
       "file": "grades/a.png",
       "source": "https://www.piugame.com/l_img/p2/grade/a.png",
@@ -106,6 +124,24 @@
       "file": "grades/sss_p.png",
       "source": "https://www.piugame.com/l_img/p2/grade/sss_p.png",
       "sha256": "65baa9f2435a0f39ac4f3dcdd62070d59793a2950da203f47c08de7eabd98994",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "X_C",
+      "file": "grades/x_c.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/x_c.png",
+      "sha256": "6d7cfa06d9a7069a9af3e31099a7fc579c7ec3606e91c560bfdd6ca11185e26c",
+      "width": 300,
+      "height": 178
+    },
+    {
+      "kind": "grades",
+      "code": "X_B",
+      "file": "grades/x_b.png",
+      "source": "https://www.piugame.com/l_img/p2/grade/x_b.png",
+      "sha256": "e98084c1ebd20b3d54dad7b141c412a2f8476cfe17fcd320c1e14d87f1f4241f",
       "width": 300,
       "height": 178
     },

@@ -1,5 +1,5 @@
-import { PUMBILITY_URL, PIU_ORIGIN } from './browser.js';
-import { parsePumbility, parseGameIds, resolveGameId } from './parser.js';
+import { PUMBILITY_URL, RECENT_URL, PIU_ORIGIN } from './browser.js';
+import { parsePumbility, parseRecent, parseGameIds, resolveGameId } from './parser.js';
 import { PiuError } from './errors.js';
 import { getJacketCache } from './jacket-cache.js';
 
@@ -136,26 +136,50 @@ export async function fetchGameIds(browserManager, state) {
 }
 
 export async function fetchProfile(browserManager, state, {gameId = ''} = {}) {
-  const jacketCache = getJacketCache(browserManager);
   return withAccount(browserManager, state, async ({page, initialProfile, gameIds, selectGameId}) => {
     const target = resolveGameId(gameIds, gameId);
     const profile = target && !target.selected ? await selectGameId(target) : initialProfile;
     if (target) { profile.gameId = target.gameId; profile.gameIdTag = target.tag; }
-    const images = new Map();
-    // Only same-origin official jackets, without forwarding cookies to third-party hosts.
-    const urls = [...new Set(profile.records.map(r => r.jacket).filter(Boolean))];
-    let cursor = 0;
-    await Promise.all(Array.from({length: Math.min(4, urls.length)}, async () => {
-      while (cursor < urls.length) {
-        const url = urls[cursor++];
-        for (let attempt = 0; attempt < 2; attempt++) {
-          try {
-            const data = await jacketCache.getOrLoad(url, source => fetchOfficialJacket(page, source));
-            if (data) { images.set(url, data); break; }
-          } catch { /* One bounded retry for a missing jacket; scores remain unchanged. */ }
-        }
-      }
-    }));
+    const images = await profileJackets(browserManager, page, profile);
     return {profile, images, gameIds};
   });
+}
+
+export async function fetchRecent(browserManager, state, {gameId = ''} = {}) {
+  return withAccount(browserManager, state, async ({page, initialProfile, gameIds, selectGameId}) => {
+    const target = resolveGameId(gameIds, gameId);
+    const selected = target && !target.selected ? await selectGameId(target) : initialProfile;
+    let response;
+    try { response = await page.goto(RECENT_URL, {waitUntil: 'domcontentloaded'}); }
+    catch { throw new PiuError('NETWORK', '无法访问 PIU 最近游玩页面，请稍后重试。'); }
+    if (!page.url().startsWith(RECENT_URL)) throw new PiuError('AUTH_REQUIRED', '登录已失效，请私聊发送 #piu 登录。');
+    if (!response?.ok()) throw new PiuError('NETWORK', 'PIU 最近游玩页面返回异常状态，请稍后重试。');
+    const profile = parseRecent(await page.content());
+    if (profile.playerName !== selected.playerName) {
+      throw new PiuError('GAME_ID_SWITCH_FAILED', '最近游玩的 GAME ID 与请求不一致，已停止出图。');
+    }
+    if (target) { profile.gameId = target.gameId; profile.gameIdTag = target.tag; }
+    const images = await profileJackets(browserManager, page, profile);
+    return {profile, images, gameIds};
+  });
+}
+
+async function profileJackets(browserManager, page, profile) {
+  const jacketCache = getJacketCache(browserManager);
+  const images = new Map();
+  // Deduplicate downloads, never the actual recent-play records.
+  const urls = [...new Set(profile.records.map(record => record.jacket).filter(Boolean))];
+  let cursor = 0;
+  await Promise.all(Array.from({length: Math.min(4, urls.length)}, async () => {
+    while (cursor < urls.length) {
+      const url = urls[cursor++];
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const data = await jacketCache.getOrLoad(url, source => fetchOfficialJacket(page, source));
+          if (data) { images.set(url, data); break; }
+        } catch { /* One bounded retry for missing art; scores remain unchanged. */ }
+      }
+    }
+  }));
+  return images;
 }

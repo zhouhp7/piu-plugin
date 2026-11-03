@@ -93,9 +93,10 @@ async function main() {
     } finally { await ranking.close(); }
     return;
   }
-  if (command === 'fetch') {
+  if (command === 'fetch' || command === 'recent') {
     const service = await createService(loadConfig());
-    try { await save(args[1] || 'best50.png', await service.best50(args[0] || 'local', args.slice(2).join(' '))); }
+    try { await save(args[1] || (command === 'recent' ? 'recent.png' : 'best50.png'),
+      await service[command === 'recent' ? 'recent' : 'best50'](args[0] || 'local', args.slice(2).join(' '))); }
     finally { await service.close(); }
     return;
   }
@@ -120,7 +121,24 @@ async function main() {
     } finally { await service.close(); }
     return;
   }
-  console.log('PIU Best50 / 排行榜\n  npm run setup\n  node bin/piu.js render profile.json out.png\n  node bin/piu.js parse pumbility.html profile.json\n  node bin/piu.js login-local [user]\n  node bin/piu.js serve [user]\n  node bin/piu.js list [user]\n  node bin/piu.js fetch [user] [out.png] [名称#标签，如 ZANTING#9403]\n  node bin/piu.js rank-login-local\n  node bin/piu.js rank-capture | rank-daemon | rank-dates | rank-audit | rank-prefetch\n  node bin/piu.js rank-follow owner SHAWN#1477 YINYBEST#3231 CHIPHANT#5633\n  node bin/piu.js rank-unfollow owner SHAWN#1477\n  node bin/piu.js rank owner [YYYYMMDD YYYYMMDD] [out.png]\n  node bin/piu.js rank-preview owner [YYYYMMDD] [out.png]\n  未指定 B50 档案时生成首个档案；不接受纯名称、纯标签或 uid。');
+  console.log([
+    'PIU Best50 / 最近游玩 / 排行榜',
+    '  npm run setup',
+    '  node bin/piu.js render profile.json out.png',
+    '  node bin/piu.js parse pumbility.html profile.json',
+    '  node bin/piu.js login-local [user]',
+    '  node bin/piu.js serve [user]',
+    '  node bin/piu.js list [user]',
+    '  node bin/piu.js fetch [user] [out.png] [名称#标签，如 ZANTING#9403]',
+    '  node bin/piu.js recent [user] [out.png] [名称#标签，如 ZANTING#9403]',
+    '  node bin/piu.js rank-login-local',
+    '  node bin/piu.js rank-capture | rank-daemon | rank-dates | rank-audit | rank-prefetch',
+    '  node bin/piu.js rank-follow owner SHAWN#1477 YINYBEST#3231 CHIPHANT#5633',
+    '  node bin/piu.js rank-unfollow owner SHAWN#1477',
+    '  node bin/piu.js rank owner [YYYYMMDD YYYYMMDD] [out.png]',
+    '  node bin/piu.js rank-preview owner [YYYYMMDD] [out.png]',
+    '  未指定 B50 / recent 档案时生成首个档案；不接受纯名称、纯标签或 uid。',
+  ].join('\n'));
 }
 main().catch(error => {
   // Never dump browser errors, request bodies, cookies or URLs with session identifiers.

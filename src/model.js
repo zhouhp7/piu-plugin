@@ -37,7 +37,7 @@ function mode(value) {
  * demo:true is an explicit, optional marker for fabricated example data.
  *
  * @param {object} input
- * @returns {{playerName:string,pumbility:number|null,ranking:string|null,
+ * @returns {{kind:string,playerName:string,pumbility:number|null,ranking:string|null,
  *   avatar:string|null,updatedAt:string|null,demo:boolean,records:Array}}
  */
 export function normalizeProfile(input = {}) {
@@ -46,6 +46,7 @@ export function normalizeProfile(input = {}) {
   }
   const source = Array.isArray(input.records) ? input.records : [];
   return {
+    kind: input.kind === 'recent' ? 'recent' : 'best50',
     playerName: text(input.playerName, 'PIU PLAYER', 120),
     pumbility: number(input.pumbility),
     ranking: text(input.ranking, null, 80),
@@ -64,6 +65,7 @@ export function normalizeProfile(input = {}) {
         grade: text(item.grade, '—', 32),
         gradeCode: text(item.gradeCode, null, 32),
         failed: item.failed === true,
+        stageBreak: item.stageBreak === true,
         plate: text(item.plate, null, 24),
         rating: number(item.rating),
         jacket: text(item.jacket, null, 2048),

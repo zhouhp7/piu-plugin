@@ -10,5 +10,7 @@ data/
 *.sqlite-shm
 *.sqlite-wal
 work/
+outputs/
+.DS_Store
 playwright-report/
 test-results/

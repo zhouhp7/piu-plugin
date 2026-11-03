@@ -21,7 +21,7 @@ test('normalization preserves order, missing data, and 50-record cap without der
   assert.equal(failed.failed, true);
 });
 test('renderer makes a complete valid PNG and never fetches arbitrary image sources by default', async () => {
-  assert.ok(CARD_WIDTH / CARD_HEIGHT >= 3.5, 'cards remain flat enough for the inline score and badge row');
+  assert.equal(CARD_WIDTH / CARD_HEIGHT, 600 / 260, 'cards retain the supplied reference proportions');
   const png = await renderBest50({playerName:'中文测试 / PIU', records:[{title:'A very long title ' .repeat(12), jacket:'https://127.0.0.1/private', rating:300, grade:'S+'}]});
   assert.equal(png.subarray(1,4).toString(), 'PNG');
   assert.equal(png.readUInt32BE(16), IMAGE_WIDTH);

@@ -9,7 +9,7 @@ test('all requested grade and plate originals are bundled, including failed grad
   const {grades, plates} = await loadBadgeAssets();
   assert.deepEqual([...grades.keys()], [...GRADE_CODES, ...GRADE_CODES.map(code => `X_${code}`)]);
   assert.deepEqual([...plates.keys()], [...PLATE_CODES]);
-  assert.equal(grades.size, 24);
+  assert.equal(grades.size, GRADE_CODES.length * 2);
   assert.equal(plates.size, 8);
 });
 
