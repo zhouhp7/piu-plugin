@@ -1,0 +1,70 @@
+import {createCanvas} from '@napi-rs/canvas';
+import {UI_COLORS as C,panel,text,wrapLines} from './ui.js';
+
+export const HELP_GROUPS = Object.freeze([
+  {title:'账号与成绩',items:[
+    {command:'#piu 登录',description:'私聊扫码，在独立窗口完成官网登录并绑定。',aliases:'登陆 / 绑定 / login'},
+    {command:'#piu list',description:'私聊列出本人账号绑定的全部档案。',aliases:'账号 / 游戏ID / ids'},
+    {command:'#piu b50 [名称#标签]',description:'生成 Pumbility Best50；省略档案时使用首个。',aliases:'best50'},
+    {command:'#piu recent [名称#标签]',description:'最近最多 50 次游玩，保留重复，显示游戏分数和时间。'},
+    {command:'#piu data [名称#标签]',description:'Play Data：游玩次数、Grade 和 Plate 达成统计。'},
+    {command:'#piu 解绑',description:'删除本人登录会话和成绩图片缓存。',aliases:'退出 / logout'},
+  ]},
+  {title:'关注与排行榜',items:[
+    {command:'#piu follow 名称#标签 ...',description:'批量添加关注；名单按发命令的用户独立保存。'},
+    {command:'#piu unfollow 名称#标签 ...',description:'批量取消关注。follow / unfollow 不带参数时查看关注列表。'},
+    {command:'#piu rank',description:'比较本周一 01:00 与上周一 01:00（GMT+8）的快照。'},
+    {command:'#piu rank 日期1 日期2',description:'日期为 YYYYMMDD；前者为当前、后者为基准。'},
+    {command:'#piu ranklogin',description:'仅机器人主人私聊：登录并授权每日排行榜采集。'},
+  ]},
+]);
+export const HELP_NOTES = Object.freeze([
+  '#piu help / #piu 帮助：查看本帮助图片。[] 表示可选参数，输入命令时去掉方括号。',
+  'b50 / recent / data 不指定档案时，使用本人账号列表中的首个档案。',
+  '所有显式档案标识都用完整的 名称#四位标签。示例：#piu b50 ZANTING#9403；#piu recent ZANTING#9403；#piu data ZANTING#9403。',
+  '批量关注示例：#piu follow SHAWN#1477 YINYBEST#3231 CHIPHANT#5633。名称含空格时加引号。',
+  '日期示例：#piu rank 20261103 20261102。缺失的历史快照不能比较，也不会补造。',
+  '机器人在线且排行榜专用会话有效时，每天 GMT+8 01:00 保存全球前 1000 名；按配置保活，失效后由主人重新登录。普通个人登录不会授权全局排行榜采集。',
+  '登录、list 仅限私聊；ranklogin 还要求主人权限。二维码是插件登录入口，非官网原生扫码授权；使用账号密码登录，会话加密保存，不保存密码，二维码请勿转发。',
+]);
+
+export const HELP_IMAGE_WIDTH=1200;
+let pending;
+/** Available before login/configuration. The guide contains no account data. */
+export function renderHelp() {
+  if(!pending)pending=drawHelp().catch(error=>{pending=undefined;throw error;});
+  return pending;
+}
+async function drawHelp() {
+  const width=HELP_IMAGE_WIDTH,margin=48,inner=width-margin*2;
+  const measuring=createCanvas(1,1).getContext('2d');
+  const groups=HELP_GROUPS.map(group=>({...group,items:group.items.map(item=>({...item,
+    lines:wrapLines(measuring,item.description,inner-48,23),
+    height:66+wrapLines(measuring,item.description,inner-48,23).length*30+(item.aliases?26:0)}))}));
+  const notes=HELP_NOTES.map(value=>wrapLines(measuring,value,inner-48,22));
+  const groupHeight=groups.reduce((sum,group)=>sum+62+group.items.reduce((n,item)=>n+item.height+10,0)+20,0);
+  const noteHeight=64+notes.reduce((sum,lines)=>sum+lines.length*31+14,0);
+  const canvas=createCanvas(width,180+groupHeight+noteHeight+54),ctx=canvas.getContext('2d');
+  ctx.fillStyle=C.background;ctx.fillRect(0,0,width,canvas.height);
+  ctx.fillStyle=C.cyan;ctx.fillRect(margin,0,360,6);
+  text(ctx,'PIU 命令帮助',margin,86,inner,48,C.cyan,900);
+  text(ctx,'BEST50  /  RECENT  /  PLAY DATA  /  RANKING',margin,130,inner,22,C.muted,700);
+  let y=174;
+  for(const group of groups){
+    text(ctx,group.title,margin,y+38,inner,32,C.text,700);y+=62;
+    for(const item of group.items){
+      panel(ctx,margin,y,inner,item.height);
+      text(ctx,item.command,margin+24,y+39,inner-48,28,C.cyan,700);
+      item.lines.forEach((line,index)=>text(ctx,line,margin+24,y+77+index*30,inner-48,23,C.text));
+      if(item.aliases)text(ctx,`别名：${item.aliases}`,margin+24,y+item.height-14,inner-48,19,C.muted);
+      y+=item.height+10;
+    }
+    y+=20;
+  }
+  text(ctx,'使用说明',margin,y+38,inner,30,C.text,700);y+=66;
+  for(const lines of notes){
+    for(const line of lines){text(ctx,line,margin+12,y+24,inner-24,22,C.muted);y+=31;}
+    y+=14;
+  }
+  return canvas.encode('png');
+}

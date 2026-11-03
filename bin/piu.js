@@ -93,10 +93,11 @@ async function main() {
     } finally { await ranking.close(); }
     return;
   }
-  if (command === 'fetch' || command === 'recent') {
+  if (command === 'fetch' || command === 'recent' || command === 'data') {
     const service = await createService(loadConfig());
-    try { await save(args[1] || (command === 'recent' ? 'recent.png' : 'best50.png'),
-      await service[command === 'recent' ? 'recent' : 'best50'](args[0] || 'local', args.slice(2).join(' '))); }
+    const method = {fetch:'best50',recent:'recent',data:'data'}[command];
+    try { await save(args[1] || ({fetch:'best50.png',recent:'recent.png',data:'play-data.png'}[command]),
+      await service[method](args[0] || 'local', args.slice(2).join(' '))); }
     finally { await service.close(); }
     return;
   }
@@ -131,13 +132,14 @@ async function main() {
     '  node bin/piu.js list [user]',
     '  node bin/piu.js fetch [user] [out.png] [名称#标签，如 ZANTING#9403]',
     '  node bin/piu.js recent [user] [out.png] [名称#标签，如 ZANTING#9403]',
+    '  node bin/piu.js data [user] [out.png] [名称#标签，如 ZANTING#9403]',
     '  node bin/piu.js rank-login-local',
     '  node bin/piu.js rank-capture | rank-daemon | rank-dates | rank-audit | rank-prefetch',
     '  node bin/piu.js rank-follow owner SHAWN#1477 YINYBEST#3231 CHIPHANT#5633',
     '  node bin/piu.js rank-unfollow owner SHAWN#1477',
     '  node bin/piu.js rank owner [YYYYMMDD YYYYMMDD] [out.png]',
     '  node bin/piu.js rank-preview owner [YYYYMMDD] [out.png]',
-    '  未指定 B50 / recent 档案时生成首个档案；不接受纯名称、纯标签或 uid。',
+    '  未指定 B50 / recent / data 档案时生成首个档案；不接受纯名称、纯标签或 uid。',
   ].join('\n'));
 }
 main().catch(error => {

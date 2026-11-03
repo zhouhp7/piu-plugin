@@ -1,12 +1,13 @@
 import path from 'node:path';
 import { BrowserManager } from './browser.js';
-import { fetchProfile, fetchRecent, fetchGameIds, readProfile, piuOnlyState } from './client.js';
+import { fetchProfile, fetchRecent, fetchPlayData, fetchGameIds, readProfile, piuOnlyState } from './client.js';
 import { Vault } from './vault.js';
 import { createBridge } from './bridge.js';
 import { renderBest50, renderRecent } from './render.js';
 import { PiuError } from './errors.js';
 import { normalizeGameIdSelector } from './parser.js';
 import { enrichProfileRanking } from './profile-ranking.js';
+import { renderPlayData } from './play-data.js';
 
 export async function createService(config, dependencies = {}) {
   const vault = dependencies.vault ?? new Vault({directory: path.join(config.dataDir, 'sessions'), key: config.key});
@@ -16,6 +17,11 @@ export async function createService(config, dependencies = {}) {
   const getGameIds = dependencies.fetchGameIds ?? fetchGameIds;
   const render = dependencies.renderBest50 ?? renderBest50;
   const renderRecentImage = dependencies.renderRecent ?? renderRecent;
+  const imageTypes = {
+    b50: {fetch: getProfile, render},
+    recent: {fetch: getRecent, render: renderRecentImage},
+    data: {fetch: dependencies.fetchPlayData ?? fetchPlayData, render: dependencies.renderPlayData ?? renderPlayData},
+  };
   // Buckets keep cards isolated while bounding memory by both users and card images.
   const cache = new Map();
   const summaries = new Map();
@@ -88,10 +94,10 @@ export async function createService(config, dependencies = {}) {
     return run(userKey, query, async () => {
       const session = await loadSession(userKey);
       summaries.delete(userKey);
-      const recent = kind === 'recent';
-      const result = await (recent ? getRecent : getProfile)(browser, session.state, {gameId: selector});
-      const profile = recent ? result.profile : enrichProfileRanking(result.profile, {dataDir: config.dataDir});
-      const png = await (recent ? renderRecentImage : render)(profile, {loadImage: url => result.images.get(url) ?? null});
+      const type = imageTypes[kind];
+      const result = await type.fetch(browser, session.state, {gameId: selector});
+      const profile = enrichProfileRanking(result.profile, {dataDir: config.dataDir});
+      const png = await type.render(profile, {loadImage: url => result.images.get(url) ?? null});
       await vault.save(userKey, {...session, state: result.state});
       rememberImage(userKey, cacheKey, png);
       return png;
@@ -144,6 +150,9 @@ export async function createService(config, dependencies = {}) {
     async recent(userKey, gameId = '') {
       return scoreImage(userKey, gameId, 'recent');
     },
+    async data(userKey, gameId = '') {
+      return scoreImage(userKey, gameId, 'data');
+    },
     async gameIds(userKey) {
       if (mutations.has(userKey)) throw new PiuError('BUSY', '账号正在绑定或解绑，请稍后再试。');
       const current = pending.get(userKey);
@@ -159,6 +168,7 @@ export async function createService(config, dependencies = {}) {
         const bucket = cache.get(userKey);
         bucket?.delete('b50:');
         bucket?.delete('recent:');
+        bucket?.delete('data:');
         const result = await getGameIds(browser, session.state);
         await vault.save(userKey, {...session, state: result.state});
         summaries.set(userKey, {gameIds: structuredClone(result.gameIds), at: Date.now()});

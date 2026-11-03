@@ -10,7 +10,7 @@ function gate() {
 const state = label => ({cookies: [{name: 'sid', domain: '.piugame.com', path: '/', value: label}], origins: []});
 async function fixture(t, overrides = {}) {
   const records = new Map([['owner', {state: state('old'), savedAt: Date.now()}]]);
-  const calls = {fetch: [], recent: [], ids: 0, saves: [], deletes: []};
+  const calls = {fetch: [], recent: [], data: [], ids: 0, saves: [], deletes: []};
   let callbacks;
   const vault = {
     async load(key) { return structuredClone(records.get(key) ?? null); },
@@ -30,6 +30,11 @@ async function fixture(t, overrides = {}) {
       if (overrides.onRecent) await overrides.onRecent(gameId);
       return {profile: {kind:'recent',label:`${saved.cookies[0].value}:${gameId || 'current'}`}, images:new Map(), state:saved};
     },
+    fetchPlayData: async (_browser,saved,{gameId}) => {
+      calls.data.push(gameId);
+      if(overrides.onData)await overrides.onData(gameId);
+      return {profile:{label:`${saved.cookies[0].value}:${gameId||'current'}`},images:new Map(),state:saved};
+    },
     fetchGameIds: async (_browser, saved) => {
       calls.ids++;
       if (overrides.onIds) await overrides.onIds();
@@ -37,6 +42,7 @@ async function fixture(t, overrides = {}) {
     },
     renderBest50: async profile => Buffer.from(profile.label),
     renderRecent: async profile => Buffer.from(`recent:${profile.label}`),
+    renderPlayData: async profile => Buffer.from(`data:${profile.label}`),
   });
   t.after(() => service.close());
   return {service, records, calls, callbacks};
@@ -71,6 +77,34 @@ test('recent uses its own cache, validates full IDs, and requires a bound person
   await assert.rejects(f.service.recent('another'), {code:'AUTH_REQUIRED'});
   await f.service.unbind('owner');
   await assert.rejects(f.service.recent('owner'), {code:'AUTH_REQUIRED'});
+});
+
+test('Play Data requires a bound session and has a separate per-profile image cache',async t=>{
+  const f=await fixture(t);
+  const best=await f.service.best50('owner'),recent=await f.service.recent('owner'),data=await f.service.data('owner');
+  assert.equal(data.toString(),'data:old:current');
+  assert.strictEqual(await f.service.data('owner'),data);
+  assert.strictEqual(await f.service.best50('owner'),best);
+  assert.strictEqual(await f.service.recent('owner'),recent);
+  assert.equal((await f.service.data('owner','ZANTING#9403')).toString(),'data:old:ZANTING#9403');
+  assert.deepEqual(f.calls.data,['','ZANTING#9403']);
+  await assert.rejects(f.service.data('other'),{code:'AUTH_REQUIRED'});
+  await assert.rejects(f.service.data('owner','#9403'),{code:'GAME_ID_FORMAT'});
+  await f.service.unbind('owner');
+  await assert.rejects(f.service.data('owner'),{code:'AUTH_REQUIRED'});
+});
+
+test('Play Data locks account switching against B50, recent and listing',async t=>{
+  const blocked=gate();
+  const f=await fixture(t,{onData:async()=>{blocked.start();await blocked.waiting;}});
+  const data=f.service.data('owner');await blocked.ready;
+  const same=f.service.data('owner');
+  await assert.rejects(f.service.best50('owner'),{code:'BUSY'});
+  await assert.rejects(f.service.recent('owner'),{code:'BUSY'});
+  await assert.rejects(f.service.gameIds('owner'),{code:'BUSY'});
+  blocked.release();
+  const [left,right]=await Promise.all([data,same]);
+  assert.strictEqual(left,right);
 });
 
 test('recent shares the account-switch lock with B50 and merges identical in-flight recent requests', async t => {

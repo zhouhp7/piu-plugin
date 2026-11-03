@@ -1,6 +1,7 @@
 import { createCanvas, loadImage as decodeImage } from '@napi-rs/canvas';
 import { loadBadgeAssets } from './assets.js';
 import { normalizeProfile } from './model.js';
+import { formatShanghaiTime } from './time-format.js';
 
 export const CARD_WIDTH = 600;
 export const CARD_HEIGHT = 260;
@@ -191,31 +192,32 @@ function drawHeader(ctx, profile, images, family) {
   fitText(ctx, profile.demo ? 'FABRICATED DEMO DATA' : recent ? 'PIUGAME.COM  /  RECENTLY PLAYED' : 'PIUGAME.COM  /  MY PUMBILITY', IMAGE_WIDTH - 80, 67, 850, 21,
     profile.demo ? '#ffb88c' : COLORS.muted, 700, family);
   ctx.textAlign = 'left';
-  fitText(ctx, recent ? 'RECENT' : 'PUMBILITY', 76, 162, 1130, 90, COLORS.light, 900, family);
-  fitText(ctx, recent ? '50 PLAYS' : 'BEST 50', recent ? 530 : 706, 162, recent ? 580 : 1000, recent ? 76 : 90, COLORS.cyan, 900, family);
+  fitText(ctx, recent ? 'RECENT' : 'PUMBILITY', 76, 185, 1130, 90, COLORS.light, 900, family);
+  fitText(ctx, recent ? '50 PLAYS' : 'BEST 50', recent ? 530 : 706, 185, recent ? 580 : 1000, 90, COLORS.cyan, 900, family);
 
   const infoX = 1150;
-  const gradient = ctx.createLinearGradient(infoX, 84, IMAGE_WIDTH - 80, 192);
+  const gradient = ctx.createLinearGradient(infoX, 84, IMAGE_WIDTH - 80, 212);
   gradient.addColorStop(0, '#1a2a40'); gradient.addColorStop(1, '#171e32');
-  panel(ctx, infoX, 84, IMAGE_WIDTH - infoX - 80, 108, 18, gradient, '#40536b');
-  ctx.fillStyle = COLORS.cyan; ctx.fillRect(infoX, 108, 4, 60);
-  if (!imageCover(ctx, images.get(profile.avatar), 1170, 102, 72, 72, 16)) {
-    panel(ctx, 1170, 102, 72, 72, 16, '#273f53', '#4c7182');
-    arrow(ctx, 1206, 138, 34, Math.PI / 4, COLORS.cyan);
+  panel(ctx, infoX, 84, IMAGE_WIDTH - infoX - 80, 128, 18, gradient, '#40536b');
+  ctx.fillStyle = COLORS.cyan; ctx.fillRect(infoX, 108, 4, 80);
+  if (!imageCover(ctx, images.get(profile.avatar), 1170, 115, 72, 72, 16)) {
+    panel(ctx, 1170, 115, 72, 72, 16, '#273f53', '#4c7182');
+    arrow(ctx, 1206, 151, 34, Math.PI / 4, COLORS.cyan);
   }
   const totalX = profile.ranking ? 2210 : 2590;
-  fitText(ctx, profile.playerName, 1270, 151, totalX - 1344, 40, COLORS.light, 700, family);
+  heroText(ctx, profile.playerName, 1270, 185, totalX - 1344, COLORS.light, family);
 
   ctx.strokeStyle = '#42546a'; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(totalX - 42, 106); ctx.lineTo(totalX - 42, 170); ctx.stroke();
-  fitText(ctx, recent ? 'RECENT RECORDS' : 'TOTAL PUMBILITY', totalX, 116, 445, 17, COLORS.muted, 700, family);
-  fitText(ctx, formatNumber(recent ? profile.records.length : profile.pumbility, 3), totalX - 4, 166, 450, 52, COLORS.cyan, 700, family);
+  ctx.beginPath(); ctx.moveTo(totalX - 42, 114); ctx.lineTo(totalX - 42, 194); ctx.stroke();
+  const showCount = recent && profile.pumbility === null;
+  fitText(ctx, showCount ? 'RECENT RECORDS' : 'TOTAL PUMBILITY', totalX, 106, 445, 17, COLORS.muted, 700, family);
+  heroText(ctx, formatNumber(showCount ? profile.records.length : profile.pumbility, 3), totalX - 4, 185, 450, COLORS.cyan, family);
   if (profile.ranking) {
     const rankingX = 2760;
-    ctx.beginPath(); ctx.moveTo(rankingX - 40, 106); ctx.lineTo(rankingX - 40, 170); ctx.stroke();
-    fitText(ctx, 'WORLD RANK', rankingX, 116, 320, 17, COLORS.muted, 700, family);
+    ctx.beginPath(); ctx.moveTo(rankingX - 40, 114); ctx.lineTo(rankingX - 40, 194); ctx.stroke();
+    fitText(ctx, 'WORLD RANK', rankingX, 106, 320, 17, COLORS.muted, 700, family);
     const rank = /^\d[\d,]*$/.test(profile.ranking) ? `#${profile.ranking}` : profile.ranking;
-    fitText(ctx, rank, rankingX - 4, 164, 320, 47, COLORS.light, 700, family);
+    heroText(ctx, rank, rankingX - 4, 185, 320, COLORS.light, family);
   }
 
   ctx.textAlign = 'right';
@@ -228,6 +230,14 @@ function drawHeader(ctx, profile, images, family) {
   }
 }
 
+function heroText(ctx, value, x, y, maxWidth, color, family) {
+  let size = 90;
+  font(ctx, size, 900, family);
+  while (ctx.measureText(String(value)).width > maxWidth && size > 36) font(ctx, --size, 900, family);
+  ctx.fillStyle = color;
+  ctx.fillText(String(value), x, y, maxWidth);
+}
+
 function drawRating(ctx, value, x, y, maxWidth, color, family) {
   const output = formatNumber(value, 3);
   let size = 80;
@@ -236,16 +246,6 @@ function drawRating(ctx, value, x, y, maxWidth, color, family) {
   ctx.fillStyle = color;
   ctx.fillText(output, x, y, maxWidth);
   return Math.min(maxWidth, ctx.measureText(output).width);
-}
-
-const PLAY_TIME = new Intl.DateTimeFormat('en-CA', {timeZone: 'Asia/Shanghai', year: 'numeric',
-  month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'});
-function playedTime(value) {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return '—';
-  const parts = Object.fromEntries(PLAY_TIME.formatToParts(date).map(part => [part.type, part.value]));
-  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} GMT+8`;
 }
 
 function drawLevel(ctx, record, centerX, centerY, family) {
@@ -294,7 +294,7 @@ function drawCard(ctx, record, slot, x, y, images, badges, family, isDemo, recen
   } else {
     drawRating(ctx, recent ? record.score : record.rating, detailsX - 2, y + (recent ? 137 : 150), detailsWidth - 4, accent, family);
   }
-  if (recent) fitText(ctx, playedTime(record.playedAt), detailsX, y + 165, detailsWidth, 16, COLORS.muted, 400, family);
+  if (recent) fitText(ctx, formatShanghaiTime(record.playedAt), detailsX, y + 165, detailsWidth, 16, COLORS.muted, 400, family);
 
   const badgesY = y + h - 84;
   const badgeBackground = ctx.createLinearGradient(detailsX, badgesY, detailsX + detailsWidth, badgesY + 72);
@@ -325,7 +325,7 @@ function drawFooter(ctx, profile, family) {
       ? 'SOURCE  /  piugame.com/my_page/recently_played.php  ·  Game scores  ·  Newest first  ·  Times: GMT+8'
       : 'SOURCE  /  piugame.com/my_page/pumbility.php  ·  Official order preserved  ·  Missing values shown as —',
   80, FOOTER_LINE + 34, IMAGE_WIDTH - 160, 18, profile.demo ? '#ffb88c' : COLORS.muted, 400, family);
-  fitText(ctx, `UPDATED  /  ${profile.updatedAt ?? 'Not provided by source'}`, 80, FOOTER_LINE + 63, 1450, 17, '#6d809b', 400, family);
+  fitText(ctx, `UPDATE TIME  /  ${formatShanghaiTime(profile.updatedAt)}`, 80, FOOTER_LINE + 63, 1450, 17, '#6d809b', 400, family);
   ctx.textAlign = 'right';
   fitText(ctx, `PIU ${recent ? 'RECENT' : 'BEST50'}  /  COMMUNITY TOOL  ·  NOT AFFILIATED WITH ANDAMIRO`, IMAGE_WIDTH - 80, FOOTER_LINE + 63, 1120, 15, '#6d809b', 400, family);
   ctx.textAlign = 'left';

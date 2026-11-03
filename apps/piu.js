@@ -4,6 +4,7 @@ import { createService } from '../src/service.js';
 import { createRankingService } from '../src/ranking-service.js';
 import { loadConfig, loadRankingConfig } from '../src/config.js';
 import { publicError } from '../src/errors.js';
+import { renderHelp } from '../src/help-image.js';
 
 let servicePromise;
 let rankingPromise;
@@ -31,6 +32,7 @@ export class PiuBest50 extends plugin {
         {reg: '^#?(?:piu|PIU)\\s*(?:登录|登陆|绑定|login)$', fnc: 'login'},
         {reg: '^#?(?:piu|PIU)\\s*(?:b50|B50|best50|Best50)(?:\\s+[^@\\r\\n]{1,160})?\\s*$', fnc: 'best50'},
         {reg: '^#?(?:piu|PIU)\\s*(?:recent|RECENT)(?:\\s+[^@\\r\\n]{1,160})?\\s*$', fnc: 'recent'},
+        {reg: '^#?(?:piu|PIU)\\s*(?:data|DATA)(?:\\s+[^@\\r\\n]{1,160})?\\s*$', fnc: 'playData'},
         {reg: '^#?(?:piu|PIU)\\s*(?:list|LIST|账号|游戏ID|游戏id|ids|IDS)$', fnc: 'gameIds'},
         {reg: '^#?(?:piu|PIU)\\s*(?:ranklogin|RANKLOGIN)\\s*$', fnc: 'rankLogin', permission: 'master'},
         {reg: '^#?(?:piu|PIU)\\s*(?:rank|RANK)(?:\\s+[^\\r\\n]{1,80})?\\s*$', fnc: 'rank'},
@@ -51,27 +53,8 @@ export class PiuBest50 extends plugin {
     }
   }
   async help() {
-    return this.reply([
-      '#piu help · PIU 命令帮助',
-      '#piu help / #piu 帮助：查看本说明。',
-      '私聊 #piu 登录：领取二维码，打开独立窗口完成官网登录并绑定自己的会话；别名：登陆、绑定、login。',
-      '私聊 #piu list：列出自己账号的全部档案、完整名称#标签及 Pumbility；别名：账号、游戏ID、ids。',
-      '#piu b50：生成自己首个档案的 Pumbility Best50 图片；别名：best50。',
-      '#piu b50 ZANTING#9403：指定自己账号内的完整名称#四位标签生成图片。',
-      '#piu recent：生成自己首个档案的最近游玩图片，最多 50 条，按官网从新到旧排列；重复游玩保留，显示游戏分数和 GMT+8 游玩时间。',
-      '#piu recent ZANTING#9403：查看自己账号内指定档案的最近游玩。',
-      '#piu follow SHAWN#1477 YINYBEST#3231 CHIPHANT#5633：批量加入自己的关注列表。',
-      '#piu unfollow SHAWN#1477 YINYBEST#3231：批量移出自己的关注列表。',
-      '#piu follow / #piu unfollow：不带参数时查看自己的关注列表。',
-      '#piu rank：生成关注列表比较图，默认比较本周一 01:00 与上周一 01:00（GMT+8）的快照。',
-      '#piu rank 20261103 20261003：比较这两个日期 01:00（GMT+8）的快照，日期格式均为 YYYYMMDD。缺失的历史快照不能比较，也不会补造。',
-      '#piu 解绑：删除自己保存的登录会话和成绩图片缓存；别名：退出、logout。',
-      '仅机器人主人私聊 #piu ranklogin：登录并授权全局排行榜采集专用会话，服务器会加密保存并按配置保活。普通登录不会授权全局排行榜采集。',
-      '登录、list 仅限私聊，ranklogin 还要求机器人主人权限；其余命令可在群聊或私聊使用，关注列表和账号绑定均按发命令的用户保存。',
-      '所有显式用户标识必须使用完整的 名称#四位标签，例如 SHAWN#1477。',
-      '机器人在线且排行榜专用会话有效时，每天 GMT+8 01:00 保存全球前 1000 名；服务离线或会话失效会导致快照缺失，会话失效时需主人重新登录恢复授权。',
-      '二维码是本插件的登录入口，非官方扫码授权。仅支持账号密码登录；服务器不保存账号密码，二维码请勿转发。',
-    ].join('\n'));
+    try { return await this.reply(image(await renderHelp())); }
+    catch (error) { return this.reply(publicError(error)); }
   }
   async login() {
     if (this.e.isGroup || this.e.group_id) return this.reply('请私聊机器人发送 #piu 登录，领取自己的登录二维码。');
@@ -93,6 +76,12 @@ export class PiuBest50 extends plugin {
     const selector = message(this.e).replace(/^#?piu\s*recent/i, '').trim();
     if (/@|\[CQ:at(?:,|\])/.test(selector) || this.e.at && String(this.e.at) !== String(this.e.self_id ?? this.e.bot?.uin)) return this.reply('请填写自己账号的完整 名称#标签，例如 #piu recent ZANTING#9403。');
     try { return await this.reply(image(await (await service()).recent(identity(this.e), selector))); }
+    catch (error) { return this.reply(publicError(error)); }
+  }
+  async playData() {
+    const selector = message(this.e).replace(/^#?piu\s*data/i, '').trim();
+    if (/@|\[CQ:at(?:,|\])/.test(selector) || this.e.at && String(this.e.at) !== String(this.e.self_id ?? this.e.bot?.uin)) return this.reply('请填写自己账号的完整 名称#标签，例如 #piu data ZANTING#9403。');
+    try { return await this.reply(image(await (await service()).data(identity(this.e), selector))); }
     catch (error) { return this.reply(publicError(error)); }
   }
   async gameIds() {

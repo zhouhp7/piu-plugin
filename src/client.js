@@ -1,7 +1,8 @@
-import { PUMBILITY_URL, RECENT_URL, PIU_ORIGIN } from './browser.js';
+import { PUMBILITY_URL, RECENT_URL, PLAY_DATA_URL, PIU_ORIGIN } from './browser.js';
 import { parsePumbility, parseRecent, parseGameIds, resolveGameId } from './parser.js';
 import { PiuError } from './errors.js';
 import { getJacketCache } from './jacket-cache.js';
+import { parsePlayData } from './play-data.js';
 
 export function piuOnlyState(state) {
   return {cookies: (state.cookies ?? []).filter(cookie => ['piugame.com', 'www.piugame.com'].includes(cookie.domain.replace(/^\./, ''))),
@@ -158,9 +159,27 @@ export async function fetchRecent(browserManager, state, {gameId = ''} = {}) {
     if (profile.playerName !== selected.playerName) {
       throw new PiuError('GAME_ID_SWITCH_FAILED', '最近游玩的 GAME ID 与请求不一致，已停止出图。');
     }
+    profile.pumbility = selected.pumbility;
     if (target) { profile.gameId = target.gameId; profile.gameIdTag = target.tag; }
     const images = await profileJackets(browserManager, page, profile);
     return {profile, images, gameIds};
+  });
+}
+
+export async function fetchPlayData(browserManager, state, {gameId = ''} = {}) {
+  return withAccount(browserManager, state, async ({page, initialProfile, gameIds, selectGameId}) => {
+    const target = resolveGameId(gameIds, gameId);
+    const selected = target && !target.selected ? await selectGameId(target) : initialProfile;
+    let response;
+    try { response = await page.goto(PLAY_DATA_URL, {waitUntil: 'domcontentloaded'}); }
+    catch { throw new PiuError('NETWORK', '无法访问 PIU Play Data 页面，请稍后重试。'); }
+    if (!page.url().startsWith(PLAY_DATA_URL)) throw new PiuError('AUTH_REQUIRED', '登录已失效，请私聊发送 #piu 登录。');
+    if (!response?.ok()) throw new PiuError('NETWORK', 'PIU Play Data 页面返回异常状态，请稍后重试。');
+    const profile = parsePlayData(await page.content());
+    if (profile.playerName !== selected.playerName) throw new PiuError('GAME_ID_SWITCH_FAILED', 'Play Data 的 GAME ID 与请求不一致，已停止出图。');
+    profile.pumbility = selected.pumbility;
+    if (target) { profile.gameId = target.gameId; profile.gameIdTag = target.tag; }
+    return {profile, images: new Map(), gameIds};
   });
 }
 
