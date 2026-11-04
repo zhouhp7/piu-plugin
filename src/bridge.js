@@ -168,7 +168,15 @@ export async function createBridge({ host = '127.0.0.1', port = 17381, publicUrl
           entry.page = result.page;
         });
         try { await entry.setup; active(entry); }
-        catch (error) { await dispose(entry); throw error instanceof RequestError ? error : new RequestError(503, '无法启动登录浏览器，请重新绑定'); }
+        catch (error) {
+          if (!(error instanceof RequestError)) {
+            if (globalThis.logger?.error) globalThis.logger.error(`[PIU] 无法启动登录浏览器: ${error?.stack || error?.message || error}`);
+            else console.error('[PIU] 无法启动登录浏览器:', error);
+          }
+          await dispose(entry);
+          const message = error instanceof RequestError ? error.message : (error?.message || '无法启动登录浏览器，请重新绑定');
+          throw error instanceof RequestError ? error : new RequestError(503, message);
+        }
         const token = randomToken();
         entry.csrf = randomToken();
         entry.sessionHash = digest(token);

@@ -1,10 +1,16 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import util from 'node:util';
 
 export const ROOT = fileURLToPath(new URL('../', import.meta.url));
 function loadEnv(env) {
   if (env === process.env) {
-    try { process.loadEnvFile(path.join(ROOT, '.env')); }
+    try {
+      const content = fs.readFileSync(path.join(ROOT, '.env'), 'utf8');
+      if (typeof util.parseEnv === 'function') Object.assign(env, util.parseEnv(content));
+      else process.loadEnvFile(path.join(ROOT, '.env'));
+    }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
   }
 }
@@ -24,6 +30,7 @@ function browserConfig(env) {
     dataDir: path.resolve(ROOT, env.PIU_DATA_DIR || 'data'),
     channel: env.PIU_BROWSER_CHANNEL || undefined,
     executablePath: env.PIU_BROWSER_PATH || undefined,
+    proxy: env.PIU_PROXY || env.HTTP_PROXY || env.http_proxy || env.ALL_PROXY || env.all_proxy || undefined,
   };
 }
 export function loadConfig(env = process.env) {

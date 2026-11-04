@@ -18,8 +18,9 @@ export class BrowserManager {
   constructor(config = {}) { this.config = config; this.pending = null; }
   async browser() {
     if (!this.pending) {
-      this.pending = chromium.launch({headless: this.config.headless ?? true, channel: this.config.channel,
-        executablePath: this.config.executablePath}).catch(error => { this.pending = null; throw error; });
+      const launchOptions = { headless: this.config.headless ?? true, channel: this.config.channel, executablePath: this.config.executablePath };
+      if (this.config.proxy) launchOptions.proxy = { server: this.config.proxy };
+      this.pending = chromium.launch(launchOptions).catch(error => { this.pending = null; throw error; });
     }
     return this.pending;
   }
@@ -49,7 +50,11 @@ export class BrowserManager {
       const page = await context.newPage();
       await page.goto(PUMBILITY_URL, {waitUntil: 'domcontentloaded'});
       return {context, page};
-    } catch (error) { await context.close(); throw new PiuError('NETWORK', '无法打开 PIU 官网登录页，请检查服务器网络。'); }
+    } catch (error) {
+      if (globalThis.logger?.error) globalThis.logger.error(`[PIU] 打开官网登录页失败: ${error?.stack || error?.message || error}`);
+      await context.close();
+      throw new PiuError('NETWORK', `无法打开 PIU 官网登录页（${error?.message || '网络连接超时'}），请检查服务器网络或代理。`);
+    }
   }
   async close() {
     if (this.pending) { const browser = await this.pending.catch(() => null); this.pending = null; await browser?.close(); }
