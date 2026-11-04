@@ -1,13 +1,18 @@
 import {load} from 'cheerio';
 import {PiuError} from './errors.js';
+import {normalizeGameIdName} from './parser.js';
 
 const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim().normalize('NFC');
 const changed = message => new PiuError('RANKING_PAGE_CHANGED', message);
+const gameName = value => {
+  try { return normalizeGameIdName(value); }
+  catch { throw changed('排行榜名称须为 1 至 12 位英文字母或数字，未保存数据。'); }
+};
 
 /** Public identity is the complete name and tag, never the four digits alone. */
 export function rankingPlayerKey(gameId, tag) {
-  const name = clean(gameId);
-  if (!name || name.length > 256 || !/^#\d{4}$/.test(String(tag))) {
+  const name = gameName(gameId);
+  if (typeof tag !== 'string' || !/^#\d{4}$/.test(tag)) {
     throw changed('排行榜名称或四位标签无效，未保存数据。');
   }
   return `game:${name}${tag}`;
@@ -81,7 +86,7 @@ export function parseRankingPage(html, {page = 1} = {}) {
   let previousRank = 0;
   const entries = rows.toArray().map(element => {
     const row = $(element);
-    const gameId = clean(row.find('.profile_name.pl0').first().text());
+    const gameId = gameName(row.find('.profile_name.pl0').first().text());
     const tag = clean(row.find('.profile_name.st1').first().text());
     const playerKey = rankingPlayerKey(gameId, tag);
     if (keys.has(playerKey)) throw changed(`排行榜重复出现完整档案 ${gameId}${tag}，未保存快照。`);
@@ -103,10 +108,14 @@ export function parseRankingPage(html, {page = 1} = {}) {
 export function auditRanking(entries) {
   if (!Array.isArray(entries)) throw changed('排行榜审计输入无效。');
   const groups = new Map();
+  const keys = new Set();
   for (const entry of entries) {
     if (!entry || !/^#\d{4}$/.test(entry.tag ?? '') || !entry.gameId || !entry.playerKey) throw changed('排行榜审计条目无效。');
+    const gameId = gameName(entry.gameId), playerKey = rankingPlayerKey(gameId, entry.tag);
+    if (keys.has(playerKey)) throw changed('排行榜审计出现重复完整档案，未保存数据。');
+    keys.add(playerKey);
     if (!groups.has(entry.tag)) groups.set(entry.tag, []);
-    groups.get(entry.tag).push({playerKey: entry.playerKey, gameId: entry.gameId, tag: entry.tag, worldRank: entry.worldRank});
+    groups.get(entry.tag).push({playerKey, gameId, tag: entry.tag, worldRank: entry.worldRank});
   }
   const duplicateTags = [...groups].filter(([, players]) => players.length > 1)
     .map(([tag, players]) => ({tag, players}));

@@ -64,5 +64,5 @@ test('scaled B50 JPEG renders both progress bars while recent excludes their ext
   const b50Image=await loadImage(b50),recentImage=await loadImage(recent);
   assert.equal(b50Image.height,IMAGE_HEIGHT);
   assert.equal(recentImage.height,RECENT_IMAGE_HEIGHT);
-  assert.equal(b50Image.height,2223);assert.equal(recentImage.height,2108);
+  assert.equal(b50Image.height,2308);assert.equal(recentImage.height,2193);
 });

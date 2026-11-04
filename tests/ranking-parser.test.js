@@ -40,8 +40,8 @@ test('repeated tags are allowed, audited and never collapse different complete n
   assert.equal(audit.duplicateTagCount, 1);
   assert.equal(audit.affectedPlayers, 2);
   assert.deepEqual(audit.duplicateTags[0].players.map(entry => entry.playerKey), ['game:ALPHA#1001', 'game:BETA#1001']);
-  assert.notEqual(rankingPlayerKey('Alpha', '#1001'), rankingPlayerKey('ALPHA', '#1001'));
-  assert.equal(rankingPlayerKey('e\u0301', '#1001'), 'game:é#1001');
+  assert.equal(rankingPlayerKey('Alpha', '#1001'), rankingPlayerKey('ALPHA', '#1001'));
+  assert.throws(()=>rankingPlayerKey('e\u0301','#1001'),{code:'RANKING_PAGE_CHANGED'});
 });
 
 test('login, malformed, duplicate-full-identity and out-of-order pages fail closed', () => {
@@ -56,4 +56,21 @@ test('explicit next-page controls are parsed without treating the last-page link
   const html = wrap(row()) + '<div class="board_paging"><button onclick="location.href=\'?t=&amp;page=3\'"><i class="xi next"></i></button><a href="?page=10"><i class="xi last"></i></a></div>';
   assert.equal(parseRankingPage(html, {page: 2}).nextPage, 3);
   assert.equal(parseRankingPage(html, {page: 3}).nextPage, null);
+});
+
+test('leaderboard names are ASCII alphanumeric, bounded to twelve characters and canonical uppercase',()=>{
+  const result=parseRankingPage(wrap(row({name:'aBc123',rank:1})+row({name:'A1B2C3D4E5F6',rank:2})));
+  assert.equal(result.entries[0].gameId,'ABC123');assert.equal(result.entries[0].playerKey,'game:ABC123#1001');
+  for(const name of ['', 'A'.repeat(13), 'NAME WITH SPACE', 'A_B', 'A-B', 'Café', '名字', 'ALPHA\tBETA']) {
+    assert.throws(()=>parseRankingPage(wrap(row({name}))),{code:'RANKING_PAGE_CHANGED'});
+  }
+  assert.throws(()=>parseRankingPage(wrap(row({name:'alpha',rank:1})+row({name:'ALPHA',rank:2}))),{code:'RANKING_PAGE_CHANGED'});
+});
+
+test('audit metadata canonicalizes existing names and rejects case-only duplicate identities',()=>{
+  const original=[{gameId:'alpha',tag:'#1001',playerKey:'game:alpha#1001',worldRank:1},{gameId:'beta',tag:'#1001',playerKey:'game:beta#1001',worldRank:2}];
+  const result=auditRanking(original);
+  assert.deepEqual(result.duplicateTags[0].players.map(row=>[row.gameId,row.playerKey]),[['ALPHA','game:ALPHA#1001'],['BETA','game:BETA#1001']]);
+  assert.equal(original[0].gameId,'alpha');
+  assert.throws(()=>auditRanking([original[0],{...original[0],gameId:'ALPHA'}]),{code:'RANKING_PAGE_CHANGED'});
 });

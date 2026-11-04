@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseGameIds,resolveGameId,normalizeGameIdSelector} from '../src/parser.js';
+import {parseGameIds,resolveGameId,normalizeGameIdSelector,normalizeGameIdName} from '../src/parser.js';
 import {fetchGameIds,fetchProfile,readAccount} from '../src/client.js';
 import vm from 'node:vm';
 import {titlePage} from './helpers/title-page.js';
@@ -20,7 +20,7 @@ test('account cards use internal switch IDs and preserve visible names/tags/curr
  assert.equal(cards[1].selected,false);
  assert.equal(resolveGameId(cards).id,'111');
 });
-test('card selectors require full names and four-digit tags, rejecting old shorthand selectors',()=>{
+test('official card switching resolves canonical full identifiers and rejects malformed switches',()=>{
  const cards=parseGameIds(html);
  for(const query of ['beta #2002','BETA#2002',' BETA  # 2002 '])assert.equal(resolveGameId(cards,query).id,'222');
  assert.deepEqual(cards.map(card=>card.uid),['uid1','uid2','uid3']);
@@ -29,20 +29,42 @@ test('card selectors require full names and four-digit tags, rejecting old short
   assert.throws(()=>resolveGameId(cards,value),{code:'GAME_ID_FORMAT'});
  }
  assert.throws(()=>resolveGameId(cards,'FOREIGN #9999'),{code:'GAME_ID_NOT_FOUND'});
- assert.equal(normalizeGameIdSelector(' SHA WN  # 1477 '),'SHA WN#1477');
+ assert.equal(normalizeGameIdSelector(' shawn  # 1477 '),'SHAWN#1477');
+ assert.throws(()=>normalizeGameIdSelector(' SHA WN  # 1477 '),{code:'GAME_ID_FORMAT'});
  const repeatedTag=cards.map((card,index)=>index===1?{...card,tag:'#1001',playerName:'BETA#1001'}:card);
  assert.equal(resolveGameId(repeatedTag,'BETA#1001').id,'222');
  const caseVariants=[{id:'one',playerName:'Alice#1001'},{id:'two',playerName:'ALICE#1001'}];
- assert.equal(resolveGameId(caseVariants,'Alice#1001').id,'one');
- assert.throws(()=>resolveGameId(caseVariants,'aLiCe#1001'),{code:'GAME_ID_AMBIGUOUS'});
+ for(const value of ['Alice#1001','ALICE#1001','aLiCe#1001']) {
+  assert.throws(()=>resolveGameId(caseVariants,value),{code:'GAME_ID_AMBIGUOUS'});
+ }
+});
+
+test('profile names accept only 1–12 ASCII letters and digits and canonicalize case',()=>{
+ for(const [value,expected] of [['a','A'],['0','0'],['abc123XYZ789','ABC123XYZ789'],[' \tZaNtInG\n ','ZANTING']]){
+  assert.equal(normalizeGameIdName(value),expected);
+ }
+ for(const name of ['', ' ', 'ABCDEFGHIJKLM', 'A B', 'A\tB', 'A\nB', 'A\u00a0B', 'A\u200bB',
+  'ALPHA_', 'ALPHA-BETA', '名字', 'Café', 'ＡLPHA', 'ALPHA😀', null, undefined, 123]) {
+  assert.throws(()=>normalizeGameIdName(name),{code:'GAME_ID_FORMAT'});
+ }
+ assert.equal(normalizeGameIdSelector(' \tzanting \n # \t9403  '),'ZANTING#9403');
+ for(const value of ['ALPHA#１２３４','ALPHA#١٢٣٤','ALPHA#12 34','A B#1001','A\nB#1001','ABCDEFGHIJKLM#1001']){
+  assert.throws(()=>normalizeGameIdSelector(value),{code:'GAME_ID_FORMAT'});
+ }
 });
 test('rename inputs, malformed IDs and repeated cards cannot become switch targets',()=>{
  assert.equal(parseGameIds('<form><input name="sub_profile" value="111"></form>').length,0);
  assert.equal(parseGameIds(html.replace('value="222"','value="../../admin"')).length,2);
  assert.equal(parseGameIds(html.replace('value="333"','value="222"')).length,2);
+ for(const name of ['A B','A\tB','A\nB','ABCDEFGHIJKLM','BETA_','名字','Café','ＡLPHA']) {
+  assert.equal(parseGameIds(html.replaceAll('BETA #2002',`${name} #2002`)).length,2);
+ }
+ const mixed=parseGameIds(html.replaceAll('ALPHA','aLpHa').replace('value="111" checked','value="111"'));
+ assert.equal(mixed[0].playerName,'ALPHA#1001');assert.equal(mixed[0].gameId,'ALPHA');
+ assert.equal(mixed[0].selected,true,'current profile display matching ignores letter case');
 });
 
-function fakeAccount({breakTarget=false, failTargetNavigation=false, invalidSelection=false, multipleSelection=false, initial='111', brokenTitle=false, mismatchedTitle=false, redirectedTitle=false}={}) {
+function fakeAccount({breakTarget=false, failTargetNavigation=false, invalidSelection=false, multipleSelection=false, initial='111', brokenTitle=false, mismatchedTitle=false, redirectedTitle=false, lowercaseTitle=false}={}) {
  let active=initial,domActive=initial,closed=false,currentUrl='about:blank';
  const switches=[];
  const cards=[{id:'111',name:'ALPHA #1001',total:100},{id:'222',name:'BETA #2002',total:200},{id:'333',name:'EMPTY #3003',total:0}];
@@ -54,7 +76,7 @@ function fakeAccount({breakTarget=false, failTargetNavigation=false, invalidSele
   },
   content:async()=>{
    const card=cards.find(c=>c.id===domActive);
-   if(currentUrl.includes('/title.php'))return brokenTitle?'<h1>maintenance</h1>':titlePage(mismatchedTitle?'WRONG#9999':card.name,{single:14000+card.total,double:17000+card.total});
+   if(currentUrl.includes('/title.php'))return brokenTitle?'<h1>maintenance</h1>':titlePage(mismatchedTitle?'WRONG#9999':lowercaseTitle?card.name.toLowerCase():card.name,{single:14000+card.total,double:17000+card.total});
    const modal=`<div id="profile_modal">${cards.map(c=>`<div class="in_profile"><input name="sub_profile" value="${c.id}" ${!invalidSelection&&(c.id===domActive||(multipleSelection&&c.id==='333'))?'checked':''}><div class="name_w"><p class="t2">${c.name}</p></div></div>`).join('')}</div>`;
    if(breakTarget&&active==='222')return modal+'<h1>maintenance</h1>';
    return `<div class="subProfile_wrap"><div class="name_w"><p class="t2">${invalidSelection?'OUTSIDE #9999':card.name}</p></div></div>${modal}<div class="pumbility_total_wrap"><div class="score">${card.total}</div></div>`+
@@ -135,4 +157,12 @@ test('B50 restores the original profile after Title-page failures, mismatches an
   assert.equal(account.active(),'111');assert.equal(account.closed(),true);
   assert.deepEqual(account.switches,['222','111']);
  }
+});
+
+test('B50 and Title identity checks agree when the official pages differ only in letter case',async()=>{
+ const account=fakeAccount({lowercaseTitle:true});
+ const result=await fetchProfile(account.manager,{}, {gameId:'beta#2002'});
+ assert.equal(result.profile.playerName,'BETA#2002');
+ assert.equal(result.profile.titleProgress.playerName,'BETA#2002');
+ assert.equal(account.active(),'111');assert.equal(account.closed(),true);
 });

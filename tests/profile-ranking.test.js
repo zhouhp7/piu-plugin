@@ -28,7 +28,8 @@ test('B50 rank uses exact complete identity and preserves its source profile', t
   f.save('2026-11-02T17:00:00Z');
   assert.deepEqual(lookupWorldRank(f.filename, 'ZANTING#9403'), {worldRank: 995, capturedAt: '2026-11-02T17:00:00.000Z'});
   assert.equal(lookupWorldRank(f.filename, 'PLAYER1#9403').worldRank, 1);
-  for (const identity of ['#9403', 'ZANTING', 'zanting#9403', 'MISSING#9403']) {
+  assert.equal(lookupWorldRank(f.filename, 'zanting#9403').worldRank,995);
+  for (const identity of ['#9403', 'ZANTING', 'MISSING#9403']) {
     assert.equal(lookupWorldRank(f.filename, identity), null);
   }
   const profile = {playerName: 'ZANTING#9403', pumbility: 17841.83, ranking: null, records: []};
@@ -63,7 +64,7 @@ test('authenticated B50 and CLI fetch path pass persisted world rank to the rend
   const profile = {playerName: 'ZANTING#9403', pumbility: 17841.83, ranking: null, records: []};
   let rendered;
   const service = await createService({dataDir: f.dataDir, cacheMs: 120000, maxFetches: 2, sessionMaxAgeMs: 86400000}, {
-    vault: {async load() {return {state: {}, savedAt: Date.now()};}, async save() {}},
+    vault: {async load() {return {version:2,accounts:[{id:'account',state:{},savedAt:Date.now(),gameIds:[{id:'profile',playerName:'ZANTING#9403'}]}]};}, async save() {}},
     browser: {async close() {}},
     createBridge: async () => ({async close() {}}),
     fetchProfile: async () => ({profile, state: {}, images: new Map()}),

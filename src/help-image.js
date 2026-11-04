@@ -5,10 +5,12 @@ import {encodeOutput,scaledDimension} from './image-output.js';
 export const HELP_GROUPS = Object.freeze([
   {title:'账号与成绩',items:[
     {command:'#piu login [Cookie 内容]',description:'私聊扫码或导入 sid=会话值 添加账号；同一账号会更新会话，help 查看获取方法。',aliases:'登录 / 登陆 / 绑定'},
-    {command:'#piu list',description:'合并列出本人绑定的全部账号和档案；失效账号会标注。',aliases:'账号 / 游戏ID / ids'},
-    {command:'#piu b50 [名称#标签]',description:'生成 Best50，含 Single / Double 等级进度；省略档案时使用首个。',aliases:'best50'},
-    {command:'#piu recent [名称#标签]',description:'最近最多 50 次游玩，保留重复，显示游戏分数和时间。'},
-    {command:'#piu data [名称#标签]',description:'Play Data：游玩次数、Grade 和 Plate 达成统计。'},
+    {command:'#piu list [序号]',description:'私聊读取本地档案缓存，标注默认档案；带序号可设为默认。',aliases:'账号 / 游戏ID / ids'},
+    {command:'#piu default 序号',description:'按 list 序号设置默认档案，重启后仍保留。'},
+    {command:'#piu refresh',description:'私聊从官网刷新个人档案缓存，不触发排行榜采集。'},
+    {command:'#piu b50 [档案]',description:'生成 Best50，含 Single / Double 等级进度；省略时使用默认档案。',aliases:'best50'},
+    {command:'#piu recent [档案]',description:'最近最多 50 次游玩，保留重复，显示游戏分数和时间。'},
+    {command:'#piu data [档案]',description:'Play Data：游玩次数、Grade 和 Plate 达成统计。'},
     {command:'#piu logout',description:'删除本人全部 PIU 账号绑定和成绩图片缓存。',aliases:'解绑 / 退出'},
   ]},
   {title:'关注与排行榜',items:[
@@ -21,12 +23,14 @@ export const HELP_GROUPS = Object.freeze([
 ]);
 export const HELP_NOTES = Object.freeze([
   '#piu help / #piu 帮助：查看本帮助图片。[] 表示可选参数，输入命令时去掉方括号。',
-  'b50 / recent / data 不指定档案时，使用本人首个有效账号的首个档案；指定名称和标签时自动使用所属账号。',
-  '所有显式档案标识都用完整的 名称#四位标签。示例：#piu b50 ZANTING#9403；#piu recent ZANTING#9403；#piu data ZANTING#9403。',
-  '批量关注示例：#piu follow SHAWN#1477 YINYBEST#3231 CHIPHANT#5633。名称含空格时加引号。',
+  'b50 / recent / data 不指定档案时使用默认档案；可用 list 序号、唯一名称、唯一 #四位标签或完整 名称#四位标签 指定本人档案。重复名称或标签须改用序号或完整标识。',
+  '查询示例：#piu b50 5；#piu recent ZANTING；#piu data #9403；#piu b50 ZANTING#9403。#piu default 5 与 #piu list 5 均可设置默认档案。',
+  'list 仅读取本地档案缓存；需要更新官网档案信息时，私聊 #piu refresh。follow / unfollow 仍须使用完整的 名称#四位标签。',
+  '批量关注示例：#piu follow SHAWN#1477 YINYBEST#3231 CHIPHANT#5633。',
+  '所有档案名称仅限 1–12 位英文字母或数字，不含空格或符号；参数大小写不敏感，统一显示大写。',
   '日期示例：#piu rank 20261103 20261102。缺失的历史快照不能比较，也不会补造。',
   '机器人在线且排行榜专用会话有效时，每天 GMT+8 01:00 保存全球前 1000 名；按配置保活，失效后由主人重新登录。普通个人登录不会授权全局排行榜采集。',
-  'login、list 仅限私聊；ranklogin 还要求主人权限。二维码是插件登录入口，非官网原生扫码授权；使用账号密码登录，会话加密保存，不保存密码，二维码请勿转发。',
+  'login、list、default、refresh 仅限私聊；ranklogin 还要求主人权限。二维码是插件登录入口，非官网原生扫码授权；使用账号密码登录，会话加密保存，不保存密码，二维码请勿转发。',
   'Cookie 登录：#piu login sid=你的会话值，或粘贴完整 Cookie 请求头值 / PIU Cookie JSON。仅限私聊，验证后加密保存；只发送给可信机器人。',
   '排行榜 Cookie 授权示例：#piu ranklogin sid=你的会话值。验证完整前 1000 名后保存专用会话，不会修改个人绑定。',
   '群内 follow / unfollow / rank 使用本群共享列表；不同群互相独立，私聊保留个人列表。',

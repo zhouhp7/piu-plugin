@@ -7,9 +7,9 @@ import {RankingStore} from '../src/ranking-store.js';
 import {zoned01} from '../src/ranking-time.js';
 
 const entries = () => [
-  {playerKey: 'name:SHAWN#1477', gameId: 'SHAWN', tag: '#1477', worldRank: 1, score: 19014.20, country: 'CN', lastPlayedAt: '2026-11-01 13:05:44'},
-  {playerKey: 'name:YINBEST#3231', gameId: 'YINBEST', tag: '#3231', worldRank: 2, score: 18929.80, country: 'CN', lastPlayedAt: '2026-11-01 16:34:09'},
-  {playerKey: 'source:12345', gameId: 'CHIPHANT', tag: '#5633', worldRank: 3, score: 18556.28, country: 'CN', lastPlayedAt: null, sourceId: '12345'},
+  {playerKey: 'game:SHAWN#1477', gameId: 'SHAWN', tag: '#1477', worldRank: 1, score: 19014.20, country: 'CN', lastPlayedAt: '2026-11-01 13:05:44'},
+  {playerKey: 'game:YINBEST#3231', gameId: 'YINBEST', tag: '#3231', worldRank: 2, score: 18929.80, country: 'CN', lastPlayedAt: '2026-11-01 16:34:09'},
+  {playerKey: 'game:CHIPHANT#5633', gameId: 'CHIPHANT', tag: '#5633', worldRank: 3, score: 18556.28, country: 'CN', lastPlayedAt: null, sourceId: '12345'},
 ];
 const snapshot = (override = {}) => ({
   date: '20261103', scheduledAt: zoned01('20261103'), capturedAt: '2026-11-02T17:00:12.000Z',
@@ -66,7 +66,8 @@ test('invalid and partial batches never create or modify any saved snapshot', t 
   const store = memory(t);
   store.saveSnapshot(snapshot());
   const duplicate = entries();
-  duplicate[2].playerKey = duplicate[0].playerKey;
+  duplicate[2].gameId = duplicate[0].gameId.toLowerCase();
+  duplicate[2].tag = duplicate[0].tag;
   const invalidScore = entries();
   invalidScore[2].score = Number.NaN;
   const invalidTag = entries();
@@ -134,7 +135,7 @@ test('follow lists are owner-scoped, idempotent, stable, and remove only exact i
   assert.deepEqual(store.follow('qq:1', players), players);
   assert.equal(store.follow('qq:1', players).length, 3);
   store.follow('qq:2', [players[0]]);
-  const sameTag = {...players[2], playerKey: 'name:OTHER#1477', gameId: 'OTHER', tag: '#1477'};
+  const sameTag = {...players[2], playerKey: 'game:OTHER#1477', gameId: 'OTHER', tag: '#1477'};
   store.follow('qq:1', [sameTag]);
   assert.equal(store.getFollows('qq:1').length, 4);
   assert.equal(store.unfollow('qq:1', [players[0].playerKey]).length, 3);
@@ -149,8 +150,51 @@ test('follow batches validate fully before writing and updates preserve insertio
   store.follow('qq:1', players);
   assert.throws(() => store.follow('qq:1', [{...players[0], gameId: 'RENAMED'}, {...players[1], tag: '#1'}]), {code: 'RANK_SNAPSHOT'});
   assert.equal(store.getFollows('qq:1')[0].gameId, 'SHAWN');
-  store.follow('qq:1', [{...players[0], gameId: 'RENAMED'}]);
-  assert.deepEqual(store.getFollows('qq:1').map(row => row.gameId), ['RENAMED', 'YINBEST', 'CHIPHANT']);
+  store.follow('qq:1', [{...players[0], gameId: 'shawn', sourceId: 'source-Name-Cases'}]);
+  assert.deepEqual(store.getFollows('qq:1').map(row => row.gameId), ['SHAWN', 'YINBEST', 'CHIPHANT']);
+  assert.equal(store.getFollows('qq:1')[0].sourceId, 'source-Name-Cases');
   assert.throws(() => store.unfollow('qq:1', [players[0].playerKey, null]), {code: 'RANK_SNAPSHOT'});
   assert.equal(store.getFollows('qq:1').length, 3);
+});
+
+test('store normalizes valid lowercase names and name-bearing keys while preserving opaque source IDs', t => {
+  const store = memory(t);
+  const lower = entries().map(row => ({...row, gameId: row.gameId.toLowerCase(), playerKey: `name:${row.gameId.toLowerCase()}${row.tag}`}));
+  lower[0].sourceId = 'Mixed-Source-ID';
+  store.saveSnapshot(snapshot({entries:lower}));
+  const saved = store.getSnapshot('20261103').entries;
+  assert.deepEqual(saved.map(row => row.gameId), ['SHAWN','YINBEST','CHIPHANT']);
+  assert.deepEqual(saved.map(row => row.playerKey), ['game:SHAWN#1477','game:YINBEST#3231','game:CHIPHANT#5633']);
+  assert.equal(saved[0].sourceId, 'Mixed-Source-ID');
+  const follows = store.follow('owner', lower);
+  assert.equal(follows[0].playerKey,'game:SHAWN#1477');
+  assert.equal(store.follow('owner',entries()).length,3);
+  assert.equal(store.unfollow('owner',['game:shawn#1477']).length,2);
+});
+
+test('invalid GAME ID names cannot enter snapshot or follow storage', t => {
+  const store = memory(t);
+  store.saveSnapshot(snapshot());
+  store.follow('owner',entries());
+  for (const gameId of ['', 'A B', 'TOOLONGNAME123', 'NAME_', 'NAME-', '中文', 'ＡＢＣ', 'A\tB']) {
+    const batch = entries(); batch[0].gameId = gameId;
+    assert.throws(() => store.saveSnapshot(snapshot({capturedAt:'2026-11-02T17:01:00Z',entries:batch})),{code:'RANK_SNAPSHOT'});
+    assert.throws(() => store.follow('owner',batch),{code:'RANK_SNAPSHOT'});
+  }
+  assert.equal(store.listSnapshots().length,1);
+  assert.deepEqual(store.getFollows('owner'),entries());
+});
+
+test('legacy follow keys remain removable and updates deduplicate case variants in their original order', t => {
+  const store = memory(t);
+  const insert = store.db.prepare('INSERT INTO ranking_follows (owner,player_key,entry_json) VALUES (?,?,?)');
+  const first = {...entries()[0],gameId:'shawn',playerKey:'source:old-reader'};
+  insert.run('owner',first.playerKey,JSON.stringify(first));
+  insert.run('owner','name:SHAWN#1477',JSON.stringify({...first,gameId:'SHAWN',playerKey:'name:SHAWN#1477'}));
+  insert.run('owner',entries()[1].playerKey,JSON.stringify(entries()[1]));
+  assert.deepEqual(store.getFollows('owner').map(row=>row.gameId),['SHAWN','YINBEST']);
+  assert.equal(store.follow('owner',[entries()[0]]).length,2);
+  assert.equal(store.db.prepare('SELECT COUNT(*) AS count FROM ranking_follows WHERE owner = ?').get('owner').count,2);
+  assert.deepEqual(store.getFollows('owner').map(row=>row.gameId),['SHAWN','YINBEST']);
+  assert.deepEqual(store.unfollow('owner',['name:shawn#1477']).map(row=>row.gameId),['YINBEST']);
 });

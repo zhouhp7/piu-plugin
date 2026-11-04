@@ -6,6 +6,8 @@ import {PiuError} from './errors.js';
 import {formatShanghaiTime} from './time-format.js';
 import {UI_COLORS as C,panel,text} from './ui.js';
 import {encodeOutput,scaledDimension} from './image-output.js';
+import {drawProfileMeta} from './profile-meta-render.js';
+import {parseProfileMeta} from './profile-meta.js';
 
 const clean=value=>String(value??'').replace(/\s+/g,' ').trim();
 const changed=message=>new PiuError('PAGE_CHANGED',message);
@@ -42,7 +44,7 @@ export function parsePlayData(html) {
   const selected=select.find('option[selected]').first().length?select.find('option[selected]').first():select.find('option').first();
   return {kind:'data',playerName,playCount,playCountNote:clean($('.playData_tw .total .tt').first().text()),
     filterLabel:clean(selected.text())||'All',filterValue:selected.attr('value')??'',totalCharts:[...totals][0],
-    ...sections,pumbility:null,ranking:null,updatedAt:new Date().toISOString(),source:'piugame.com/my_page/play_data.php'};
+    ...sections,...parseProfileMeta($),pumbility:null,ranking:null,updatedAt:new Date().toISOString(),source:'piugame.com/my_page/play_data.php'};
 }
 
 const DATA_LAYOUT_WIDTH=1800;
@@ -52,7 +54,8 @@ export async function renderPlayData(profile) {
     !Number.isSafeInteger(profile.playCount)||profile.playCount<0||!Number.isSafeInteger(profile.totalCharts)||profile.totalCharts<0)throw new TypeError('Invalid Play Data');
   for(const item of [...profile.grades,...profile.plates])if(!Number.isSafeInteger(item.count)||!Number.isSafeInteger(item.total)||item.count<0||item.count>item.total)throw new TypeError('Invalid Play Data count');
   const margin=64,gap=18,cellWidth=(DATA_LAYOUT_WIDTH-margin*2-gap*3)/4,cellHeight=128;
-  const gradeTop=480,gradeRows=Math.ceil(profile.grades.length/4);
+  const metaHeight=128;
+  const gradeTop=480+metaHeight,gradeRows=Math.ceil(profile.grades.length/4);
   const plateTitle=gradeTop+gradeRows*(cellHeight+gap)+46,plateTop=plateTitle+42;
   const footerTop=plateTop+Math.ceil(profile.plates.length/4)*(cellHeight+gap)+24;
   const canvas=createCanvas(DATA_LAYOUT_WIDTH,footerTop+112),ctx=canvas.getContext('2d');
@@ -61,20 +64,21 @@ export async function renderPlayData(profile) {
   text(ctx,'PIU  /  PLAY DATA',margin,80,1300,56,C.cyan,900);
   text(ctx,profile.playerName,margin,171,profile.ranking?1180:1600,80,C.text,900);
   if(profile.ranking)text(ctx,`WORLD #${profile.ranking}`,DATA_LAYOUT_WIDTH-margin,165,430,48,C.purple,700,'right');
+  drawProfileMeta(ctx,profile,{x:margin,y:208,width:DATA_LAYOUT_WIDTH-margin*2});
   const stats=[['PLAY COUNT',profile.playCount.toLocaleString('en-US')],
     ['统计谱面',profile.totalCharts.toLocaleString('en-US')],['TOTAL PUMBILITY',profile.pumbility==null?'—':profile.pumbility.toLocaleString('en-US',{maximumFractionDigits:3})]];
   const statWidth=(DATA_LAYOUT_WIDTH-margin*2-gap*2)/3;
   stats.forEach(([label,value],index)=>{
-    const x=margin+index*(statWidth+gap);panel(ctx,x,224,statWidth,154);
-    text(ctx,label,x+24,261,statWidth-48,22,C.muted,700);
-    text(ctx,value,x+22,344,statWidth-44,76,index===2?C.purple:C.cyan,900);
+    const x=margin+index*(statWidth+gap);panel(ctx,x,224+metaHeight,statWidth,154);
+    text(ctx,label,x+24,261+metaHeight,statWidth-48,22,C.muted,700);
+    text(ctx,value,x+22,344+metaHeight,statWidth-44,76,index===2?C.purple:C.cyan,900);
   });
   const badges=await loadBadgeAssets(),decoded=new Map();
   for(const kind of ['grades','plates'])for(const item of profile[kind]) {
     const bytes=badges[kind].get(item.code);
     if(bytes)decoded.set(`${kind}:${item.code}`,await loadImage(bytes));
   }
-  text(ctx,`GRADE  ·  ${profile.filterLabel}`,margin,438,1500,34,C.text,700);
+  text(ctx,`GRADE  ·  ${profile.filterLabel}`,margin,438+metaHeight,1500,34,C.text,700);
   text(ctx,`PLATE  ·  ${profile.filterLabel}`,margin,plateTitle,1500,34,C.text,700);
   for(const [kind,top] of [['grades',gradeTop],['plates',plateTop]])profile[kind].forEach((item,index)=>{
     const x=margin+(index%4)*(cellWidth+gap),y=top+Math.floor(index/4)*(cellHeight+gap);

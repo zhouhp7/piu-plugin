@@ -4,6 +4,8 @@
  */
 
 import {normalizeTitleProgress} from './title-progress.js';
+import {normalizeGameIdName,normalizeGameIdSelector} from './parser.js';
+import {normalizeProfileMeta} from './profile-meta.js';
 
 const MODES = new Map([
   ['S', 'S'], ['SINGLE', 'S'],
@@ -40,7 +42,8 @@ function mode(value) {
  *
  * @param {object} input
  * @returns {{kind:string,playerName:string,pumbility:number|null,ranking:string|null,
- *   avatar:string|null,updatedAt:string|null,demo:boolean,records:Array}}
+ *   avatar:string|null,updatedAt:string|null,equippedTitle:string|null,lastAccessAt:string|null,
+ *   lastArcade:string|null,demo:boolean,records:Array}}
  */
 export function normalizeProfile(input = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
@@ -49,12 +52,14 @@ export function normalizeProfile(input = {}) {
   const source = Array.isArray(input.records) ? input.records : [];
   return {
     kind: input.kind === 'recent' ? 'recent' : 'best50',
-    playerName: text(input.playerName, 'PIU PLAYER', 120),
+    playerName: input.playerName == null ? 'PIU' : String(input.playerName).includes('#')
+      ? normalizeGameIdSelector(input.playerName) : normalizeGameIdName(input.playerName),
     pumbility: number(input.pumbility),
     ranking: text(input.ranking, null, 80),
     avatar: text(input.avatar, null, 2048),
     updatedAt: text(input.updatedAt, null, 120),
     demo: input.demo === true,
+    ...normalizeProfileMeta(input),
     titleProgress: normalizeTitleProgress(input.titleProgress),
     records: source.slice(0, 50).map((record, index) => {
       const item = record && typeof record === 'object' ? record : {};

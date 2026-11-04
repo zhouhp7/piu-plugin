@@ -47,3 +47,15 @@ test('a real zero-total empty profile and pagination are supported', () => {
   assert.deepEqual(result.records, []);
   assert.equal(result.lastPage, 3);
 });
+
+test('Pumbility profile headers use canonical ASCII identities while song titles stay unrestricted',()=>{
+  const withProfile=name=>fixture.replace('<body>',`<body><div class="subProfile_wrap"><div class="in_profile"><div class="name_w"><p class="t2">${name}</p></div></div></div>`);
+  const result=parsePumbility(withProfile(' \tzaNting \n # 9403 '));
+  assert.equal(result.playerName,'ZANTING#9403');
+  assert.equal(parsePumbility(fixture).playerName,null,'offline breakdowns without a header have no invented identity');
+  const song='歌名 / More Than Twelve Letters - Full Song';
+  assert.equal(parsePumbility(withProfile('a#0001').replace('Caprice of DJ Otada - Banya Production',`${song} - Any Artist`)).records[0].title,song);
+  for(const name of ['A B#1001','A\nB#1001','ALPHA_#1001','ABCDEFGHIJKLM#1001','名字#1001','ＡLPHA#1001','ALPHA#１２３４']){
+    assert.throws(()=>parsePumbility(withProfile(name)),{code:'GAME_ID_FORMAT'});
+  }
+});

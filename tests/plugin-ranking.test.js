@@ -7,6 +7,7 @@ import {HELP_GROUPS,HELP_NOTES} from '../src/help-image.js';
 const source = (await readFile(new URL('../apps/piu.js', import.meta.url), 'utf8'))
   .replace(/^import .*;\n/gm, '').replaceAll('export function ', 'function ').replaceAll('export class ', 'class ');
 const people = [{gameId: 'SHAWN', tag: '#1477', playerKey: 'name:SHAWN#1477'}];
+const ownProfile = {index:1,isDefault:true,account:1,gameId:'SHAWN',tag:'#1477',playerName:'SHAWN#1477',uid:'uid1',selected:true,pumbility:19014.2,recordCount:50};
 
 function harness() {
   const calls = [];
@@ -26,7 +27,9 @@ function harness() {
     async best50(...args) {calls.push(['best50', ...args]); return Buffer.from('PNG');},
     async recent(...args) {calls.push(['recent', ...args]); return Buffer.from('RECENT PNG');},
     async data(...args) {calls.push(['data', ...args]); return Buffer.from('DATA PNG');},
-    async gameIds(...args) {calls.push(['gameIds', ...args]); return [{gameId:'SHAWN',tag:'#1477',playerName:'SHAWN#1477',uid:'uid1',selected:true,pumbility:19014.2,recordCount:50}];},
+    async gameIds(...args) {calls.push(['gameIds', ...args]); return [ownProfile];},
+    async setDefault(...args) {calls.push(['setDefault', ...args]); return {...ownProfile,index:Number(args[1])};},
+    async refresh(...args) {calls.push(['refresh', ...args]); return [ownProfile];},
     async close() {calls.push(['bestClose']);},
   };
   const Plugin = vm.runInNewContext(`${source}\nPiuBest50;`, {
@@ -43,7 +46,7 @@ function harness() {
   });
   const app = new Plugin();
   app.e = {msg: '', user_id: 123, self_id: 456, isMaster: false};
-  return {app, calls, ranking};
+  return {app, calls, ranking, best50};
 }
 
 test('plugin starts daily ranking scheduler and closes both services through cleanup', async () => {
@@ -200,6 +203,77 @@ test('help, private account lists and B50 command forwarding use full canonical 
   assert.equal(calls.find(row => row[0] === 'best50')[2], 'ZANTING#9403');
 });
 
+test('list shows cached profile indexes and default markers without refreshing or inventing missing statistics',async()=>{
+  const {app,calls,best50}=harness();
+  best50.gameIds=async(...args)=>{
+    calls.push(['gameIds',...args]);
+    return [{...ownProfile,index:7,pumbility:null,recordCount:undefined}];
+  };
+  app.e.msg='#piu list';await app.gameIds();
+  assert.match(app.sent.at(-1),/本地缓存/);
+  assert.match(app.sent.at(-1),/7\. SHAWN#1477【默认】/);
+  assert.match(app.sent.at(-1),/Pumbility — · — 条成绩/);
+  assert.match(app.sent.at(-1),/#piu default 序号/);
+  assert.match(app.sent.at(-1),/#piu refresh/);
+  assert.equal(calls.filter(row=>row[0]==='gameIds').length,1);
+  assert.equal(calls.find(row=>row[0]==='gameIds')[1],'["default","456","123"]');
+  assert.equal(calls.some(row=>['refresh','setDefault','createRankingService'].includes(row[0])),false);
+});
+
+test('default and list index shortcuts set the owner’s default without listing or refreshing',async()=>{
+  const {app,calls}=harness();
+  const defaultRule=new RegExp(app.rule.find(row=>row.fnc==='defaultProfile').reg);
+  const listRule=new RegExp(app.rule.find(row=>row.fnc==='gameIds').reg);
+  app.e.msg='#piu default 5';assert.ok(defaultRule.test(app.e.msg));await app.defaultProfile();
+  assert.match(app.sent.at(-1),/SHAWN#1477（序号 5）.*默认档案/);
+  for(const alias of ['list','LIST','ids','账号','游戏ID']){
+    app.e.msg=`#piu ${alias} 2`;assert.ok(listRule.test(app.e.msg));await app.gameIds();
+  }
+  assert.deepEqual(calls.filter(row=>row[0]==='setDefault').map(row=>row.slice(1)),[
+    ['["default","456","123"]','5'],...Array.from({length:5},()=>['["default","456","123"]','2']),
+  ]);
+  assert.equal(calls.some(row=>['gameIds','refresh','createRankingService'].includes(row[0])),false);
+});
+
+test('default selection validates positive indexes and profile cache management stays private',async()=>{
+  const {app,calls}=harness();
+  for(const value of ['','0','-1','not-an-index']){
+    app.e.msg=`#piu default ${value}`;await app.defaultProfile();
+    assert.match(app.sent.at(-1),/用法/);
+  }
+  for(const group of [{isGroup:true},{group_id:987}]){
+    Object.assign(app.e,{isGroup:false,group_id:undefined},group);
+    for(const [method,msg] of [['gameIds','#piu list 2'],['defaultProfile','#piu default 2'],['refresh','#piu refresh']]){
+      app.e.msg=msg;await app[method]();assert.match(app.sent.at(-1),/私聊/);
+    }
+  }
+  assert.equal(calls.some(row=>['createService','setDefault','refresh','createRankingService'].includes(row[0])),false);
+});
+
+test('refresh only updates the requesting owner’s profile cache and displays the new local list',async()=>{
+  const {app,calls}=harness();
+  const rule=new RegExp(app.rule.find(row=>row.fnc==='refresh').reg);
+  app.e.msg='#piu refresh';assert.ok(rule.test(app.e.msg));assert.equal(rule.test('#piu refreshing'),false);
+  await app.refresh();
+  assert.deepEqual(calls.find(row=>row[0]==='refresh'),['refresh','["default","456","123"]']);
+  assert.match(app.sent.at(-1),/档案缓存已刷新/);
+  assert.match(app.sent.at(-1),/SHAWN#1477【默认】/);
+  assert.equal(calls.some(row=>['gameIds','createRankingService','rank','start'].includes(row[0])),false);
+});
+
+test('score commands forward indexes, unique names, tag shortcuts and full identifiers unchanged',async()=>{
+  const {app,calls}=harness();
+  const selectors=['5','ZANTING','#9403','ZANTING#9403'];
+  for(const [method,command,call] of [['best50','b50','best50'],['recent','recent','recent'],['playData','data','data']]){
+    const rule=new RegExp(app.rule.find(row=>row.fnc===method).reg);
+    for(const selector of selectors){
+      app.e.msg=`#piu ${command} ${selector}`;assert.ok(rule.test(app.e.msg));await app[method]();
+    }
+    assert.deepEqual(calls.filter(row=>row[0]===call).map(row=>row[2]),selectors);
+    assert.ok(calls.filter(row=>row[0]===call).every(row=>row[1]==='["default","456","123"]'));
+  }
+});
+
 test('help covers every bot command, permissions, schedule and mandatory full identities', async () => {
   const {app,calls} = harness();
   await app.help();
@@ -207,12 +281,12 @@ test('help covers every bot command, permissions, schedule and mandatory full id
   assert.equal(app.sent.at(-1).file.toString(),'HELP PNG');
   assert.equal(calls.some(row=>row[0]==='createService'),false,'help must work without login configuration');
   const help=[...HELP_NOTES,...HELP_GROUPS.flatMap(group=>group.items.map(item=>[item.command,item.description,item.aliases].filter(Boolean).join(' ')))].join('\n');
-  for (const command of ['#piu help', '#piu 帮助', '#piu login', '#piu list', '#piu b50', '#piu recent', '#piu data', '#piu follow', '#piu unfollow', '#piu rank', '#piu logout', '#piu ranklogin']) {
+  for (const command of ['#piu help', '#piu 帮助', '#piu login', '#piu list', '#piu default', '#piu refresh', '#piu b50', '#piu recent', '#piu data', '#piu follow', '#piu unfollow', '#piu rank', '#piu logout', '#piu ranklogin']) {
     assert.ok(help.includes(command), `help must explain ${command}`);
   }
   for (const alias of ['登录', '登陆', '绑定', '账号', '游戏ID', 'ids', 'best50', '解绑', '退出']) assert.ok(help.includes(alias));
   assert.doesNotMatch(help, /#piu cookie\b/);
-  assert.match(help, /不指定档案时.*首个档案/);
+  assert.match(help, /不指定档案时使用默认档案/);
   assert.match(help, /#piu b50 ZANTING#9403/);
   assert.match(help, /SHAWN#1477 YINYBEST#3231 CHIPHANT#5633/);
   assert.match(help, /follow \/ unfollow 不带参数时查看/);
@@ -220,13 +294,16 @@ test('help covers every bot command, permissions, schedule and mandatory full id
   assert.match(help, /#piu rank 20261103 20261102/);
   assert.match(help, /日期为 YYYYMMDD/);
   assert.match(help, /缺失的历史快照不能比较/);
-  assert.match(help, /login、list 仅限私聊/);
+  assert.match(help, /login、list、default、refresh 仅限私聊/);
   assert.match(help, /#piu ranklogin(?: \[Cookie 内容\])? 仅机器人主人私聊/);
   assert.match(help, /按配置保活/);
   assert.match(help, /普通个人登录不会授权全局排行榜采集/);
   assert.match(help, /机器人在线且排行榜专用会话有效时/);
-  assert.match(help, /所有显式档案标识都用完整的 名称#四位标签/);
-  assert.doesNotMatch(help, /#piu (?:b50|follow|unfollow) (?:uid\d+|#\d{4}|SHAWN(?:\s|$)|YINBEST(?:\s|$))/i);
+  assert.match(help, /list 序号、唯一名称、唯一 #四位标签或完整 名称#四位标签/);
+  assert.match(help, /follow \/ unfollow 仍须使用完整的 名称#四位标签/);
+  assert.match(help, /#piu default 5.*#piu list 5/);
+  assert.match(help, /list 仅读取本地档案缓存/);
+  assert.doesNotMatch(help, /#piu (?:follow|unfollow) (?:uid\d+|#\d{4}|SHAWN(?:\s|$)|YINBEST(?:\s|$))/i);
   const helpRule = app.rule.find(rule => rule.fnc === 'help');
   assert.ok(new RegExp(helpRule.reg).test('#piu help'));
   assert.ok(new RegExp(helpRule.reg).test('#piu 帮助'));

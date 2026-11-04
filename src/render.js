@@ -3,6 +3,7 @@ import { loadBadgeAssets } from './assets.js';
 import { normalizeProfile } from './model.js';
 import { formatShanghaiTime } from './time-format.js';
 import {encodeOutput, scaledDimension} from './image-output.js';
+import {drawProfileMeta} from './profile-meta-render.js';
 
 export const CARD_WIDTH = 600;
 export const CARD_HEIGHT = 260;
@@ -15,7 +16,8 @@ const GRID_BOTTOM = GRID_TOP + CARD_HEIGHT * GRID_ROWS + GRID_GAP * (GRID_ROWS -
 const FOOTER_LINE = GRID_BOTTOM + 34;
 const LAYOUT_WIDTH = PAGE_MARGIN * 2 + CARD_WIDTH * GRID_COLUMNS + GRID_GAP * (GRID_COLUMNS - 1);
 export const TITLE_PANEL_HEIGHT = 172;
-const RECENT_LAYOUT_HEIGHT = FOOTER_LINE + 84;
+const PROFILE_META_HEIGHT = 128;
+const RECENT_LAYOUT_HEIGHT = FOOTER_LINE + 84 + PROFILE_META_HEIGHT;
 const LAYOUT_HEIGHT = RECENT_LAYOUT_HEIGHT + TITLE_PANEL_HEIGHT;
 export const IMAGE_WIDTH = scaledDimension(LAYOUT_WIDTH);
 export const IMAGE_HEIGHT = scaledDimension(LAYOUT_HEIGHT);
@@ -61,9 +63,9 @@ function fitText(ctx, value, x, y, maxWidth, size, color, weight = 400, family =
   return output;
 }
 
-function formatNumber(value, digits = 0) {
+function formatNumber(value, digits = 0, useGrouping = true) {
   if (value === null || value === undefined) return '—';
-  return new Intl.NumberFormat('en-US', { maximumFractionDigits: digits }).format(value);
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: digits, useGrouping }).format(value);
 }
 
 function hash(value) {
@@ -195,7 +197,7 @@ function drawTitleProgress(ctx, profile, family) {
   const gap = 32, width = (LAYOUT_WIDTH - PAGE_MARGIN * 2 - gap) / 2;
   const tierColors = {BEGINNER:COLORS.muted, INTERMEDIATE:'#ffca28', ADVANCED:COLORS.cyan, EXPERT:'#bd9aff', MASTER:'#ff83bd'};
   for (const [index, mode] of ['single', 'double'].entries()) {
-    const x = PAGE_MARGIN + index * (width + gap), y = GRID_TOP;
+    const x = PAGE_MARGIN + index * (width + gap), y = GRID_TOP + PROFILE_META_HEIGHT;
     const value = profile.titleProgress[mode];
     const color = tierColors[value?.tier] ?? COLORS.muted;
     panel(ctx, x, y, width, 142, 16, '#152035', '#35465e');
@@ -240,20 +242,21 @@ function drawHeader(ctx, profile, images, family) {
     panel(ctx, 1170, 115, 72, 72, 16, '#273f53', '#4c7182');
     arrow(ctx, 1206, 151, 34, Math.PI / 4, COLORS.cyan);
   }
-  const totalX = profile.ranking ? 2210 : 2590;
+  const totalX = profile.ranking ? 2470 : 2760;
+  const totalWidth = profile.ranking ? 350 : 400;
   heroText(ctx, profile.playerName, 1270, 185, totalX - 1344, COLORS.light, family);
 
   ctx.strokeStyle = '#42546a'; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(totalX - 42, 114); ctx.lineTo(totalX - 42, 194); ctx.stroke();
   const showCount = recent && profile.pumbility === null;
-  fitText(ctx, showCount ? 'RECENT RECORDS' : 'TOTAL PUMBILITY', totalX, 106, 445, 17, COLORS.muted, 700, family);
-  heroText(ctx, formatNumber(showCount ? profile.records.length : profile.pumbility, 3), totalX - 4, 185, 450, COLORS.cyan, family);
+  fitText(ctx, showCount ? 'RECENT RECORDS' : 'TOTAL PUMBILITY', totalX, 106, totalWidth, 17, COLORS.muted, 700, family);
+  heroText(ctx, formatNumber(showCount ? profile.records.length : profile.pumbility, 2, false), totalX - 4, 185, totalWidth, COLORS.cyan, family);
   if (profile.ranking) {
-    const rankingX = 2760;
+    const rankingX = 2900, rankingWidth = LAYOUT_WIDTH - 80 - rankingX;
     ctx.beginPath(); ctx.moveTo(rankingX - 40, 114); ctx.lineTo(rankingX - 40, 194); ctx.stroke();
-    fitText(ctx, 'WORLD RANK', rankingX, 106, 320, 17, COLORS.muted, 700, family);
+    fitText(ctx, 'WORLD RANK', rankingX, 106, rankingWidth, 17, COLORS.muted, 700, family);
     const rank = /^\d[\d,]*$/.test(profile.ranking) ? `#${profile.ranking}` : profile.ranking;
-    heroText(ctx, rank, rankingX - 4, 185, 320, COLORS.light, family);
+    heroText(ctx, rank, rankingX - 4, 185, rankingWidth, COLORS.light, family);
   }
 
   ctx.textAlign = 'right';
@@ -274,8 +277,8 @@ function heroText(ctx, value, x, y, maxWidth, color, family) {
   ctx.fillText(String(value), x, y, maxWidth);
 }
 
-function drawRating(ctx, value, x, y, maxWidth, color, family) {
-  const output = formatNumber(value, 3);
+function drawRating(ctx, value, x, y, maxWidth, color, family, useGrouping = true) {
+  const output = formatNumber(value, 3, useGrouping);
   let size = 80;
   font(ctx, size, 700, family);
   while (ctx.measureText(output).width > maxWidth && size > 32) font(ctx, --size, 700, family);
@@ -285,12 +288,11 @@ function drawRating(ctx, value, x, y, maxWidth, color, family) {
 }
 
 function drawLevel(ctx, record, centerX, centerY, family) {
-  ctx.fillStyle = LEVEL_COLORS[record.mode] ?? LEVEL_COLORS.UNKNOWN;
-  ctx.beginPath(); ctx.arc(centerX, centerY, 23, 0, Math.PI * 2); ctx.fill();
   ctx.save();
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.font = `700 25px ${family}`; ctx.fillStyle = '#ffffff';
-  ctx.fillText(formatNumber(record.level), centerX, centerY + 1, 38);
+  ctx.font = `900 42px ${family}`;
+  ctx.fillStyle = ['S','SP'].includes(record.mode) ? '#ff6676' : ['D','DP'].includes(record.mode) ? '#48d791' : '#a7b7cc';
+  ctx.fillText(formatNumber(record.level), centerX, centerY + 1, 62);
   ctx.restore();
 }
 
@@ -328,7 +330,7 @@ function drawCard(ctx, record, slot, x, y, images, badges, family, isDemo, recen
   if (recent && record.stageBreak) {
     fitText(ctx, 'STAGE BREAK', detailsX, y + 133, detailsWidth, 33, '#ff8a94', 700, family);
   } else {
-    drawRating(ctx, recent ? record.score : record.rating, detailsX - 2, y + (recent ? 137 : 150), detailsWidth - 4, accent, family);
+    drawRating(ctx, recent ? record.score : record.rating, detailsX - 2, y + (recent ? 137 : 150), detailsWidth - 4, accent, family, !recent);
   }
   if (recent) fitText(ctx, formatShanghaiTime(record.playedAt), detailsX, y + 165, detailsWidth, 16, COLORS.muted, 400, family);
 
@@ -392,12 +394,13 @@ export async function renderBest50(input, options = {}) {
   ctx.textAlign = 'left';
   drawBackground(ctx, canvas.height);
   drawHeader(ctx, profile, images, family);
+  drawProfileMeta(ctx,profile,{x:PAGE_MARGIN,y:GRID_TOP,width:LAYOUT_WIDTH-PAGE_MARGIN*2});
   if (offset) drawTitleProgress(ctx, profile, family);
   for (let slot = 0; slot < GRID_COLUMNS * GRID_ROWS; slot += 1) {
     drawCard(ctx, profile.records[slot], slot, PAGE_MARGIN + (slot % GRID_COLUMNS) * (CARD_WIDTH + GRID_GAP),
-      GRID_TOP + offset + Math.floor(slot / GRID_COLUMNS) * (CARD_HEIGHT + GRID_GAP), images, badges, family, profile.demo, profile.kind === 'recent');
+      GRID_TOP + PROFILE_META_HEIGHT + offset + Math.floor(slot / GRID_COLUMNS) * (CARD_HEIGHT + GRID_GAP), images, badges, family, profile.demo, profile.kind === 'recent');
   }
-  drawFooter(ctx, profile, family, offset);
+  drawFooter(ctx, profile, family, PROFILE_META_HEIGHT + offset);
   return encodeOutput(canvas);
 }
 

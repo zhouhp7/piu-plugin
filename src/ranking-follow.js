@@ -1,17 +1,22 @@
 import {PiuError} from './errors.js';
+import {normalizeGameIdSelector} from './parser.js';
 
-export const canonicalPlayer = entry => `${entry.gameId}${entry.tag}`;
+export const canonicalPlayer = entry => {
+  const value = parseFullPlayer(typeof entry?.gameId === 'string' && typeof entry?.tag === 'string' ? `${entry.gameId}${entry.tag}` : null);
+  return `${value.gameId}${value.tag}`;
+};
 
 /** Explicit selectors always include both a name and the four-digit tag. */
 export function parseFullPlayer(value) {
-  const match = /^(.*?)\s*#(\d{4})$/.exec(String(value ?? '').trim());
-  if (!match || !match[1].trim() || match[1].includes('#')) {
-    throw new PiuError('RANK_ID', '请使用完整名称和四位标签，例如 SHAWN#1477；不接受纯名称或纯标签。');
-  }
-  return {gameId: match[1].normalize('NFC').trim(), tag: `#${match[2]}`};
+  let normalized;
+  try { normalized = normalizeGameIdSelector(value); }
+  catch { throw new PiuError('RANK_ID', '请使用完整的 名称#四位标签，例如 SHAWN#1477；名称限 1 至 12 位英文字母或数字，不接受简称、空格或符号。'); }
+  const match = /^([A-Z0-9]{1,12})(#\d{4})$/.exec(normalized);
+  if (!match) throw new PiuError('RANK_ID', '请使用完整的 名称#四位标签，例如 SHAWN#1477；名称限 1 至 12 位英文字母或数字。');
+  return {gameId:match[1], tag:match[2]};
 }
 
-/** Supports quoted names containing spaces, without treating input as shell code. */
+/** Parse batches without allowing whitespace to become part of a player name. */
 export function parseFollowBatch(input) {
   if (typeof input !== 'string' || input.length > 2000) throw new PiuError('RANK_ID', '关注参数过长。');
   const tokens = [];
@@ -22,7 +27,7 @@ export function parseFollowBatch(input) {
     else if (/\s/.test(char)) { if (current) { tokens.push(current); current = ''; } }
     else current += char;
   }
-  if (quote) throw new PiuError('RANK_ID', '名称引号未闭合。包含空格的名称请写成 "NAME WITH SPACE#1234"。');
+  if (quote) throw new PiuError('RANK_ID', '名称引号未闭合，请使用完整的 名称#四位标签。');
   if (current) tokens.push(current);
   const combined = [];
   for (let i = 0; i < tokens.length; i++) {
@@ -37,14 +42,14 @@ export function parseFollowBatch(input) {
 export function resolveFollowBatch(entries, selectors) {
   const resolved = [];
   for (const selector of selectors) {
-    const exact = entries.filter(row => row.gameId === selector.gameId && row.tag === selector.tag);
-    const matches = exact.length ? exact : entries.filter(row => row.gameId.toLocaleUpperCase('en-US') === selector.gameId.toLocaleUpperCase('en-US') && row.tag === selector.tag);
-    if (matches.length > 1) throw new PiuError('RANK_ID', `完整名称仍有歧义，请使用官网显示的准确大小写：${matches.map(canonicalPlayer).join('、')}`);
+    const canonical = canonicalPlayer(selector);
+    const matches = entries.filter(row => canonicalPlayer(row) === canonical);
+    if (matches.length > 1) throw new PiuError('RANK_ID', '同一完整档案在列表中重复出现，不能通过大小写区分，请先更新排行榜数据。');
     if (!matches.length) {
       const suggestions = entries.filter(row => row.tag === selector.tag).slice(0, 8).map(canonicalPlayer);
       throw new PiuError('RANK_NOT_FOUND', `未找到 ${canonicalPlayer(selector)}。${suggestions.length ? `同标签候选：${suggestions.join('、')}。` : '该档案可能不在当前保存的全球前 1000 名中。'}`);
     }
-    if (!resolved.some(row => row.playerKey === matches[0].playerKey)) resolved.push(matches[0]);
+    if (!resolved.some(row => canonicalPlayer(row) === canonical)) resolved.push(matches[0]);
   }
   return resolved;
 }

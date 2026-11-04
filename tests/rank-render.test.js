@@ -66,10 +66,10 @@ test('timestamps use GMT+8 independent of host and source display times stay unc
 });
 
 test('full identity keeps zero-padded tags and does not repeat suffix in name', () => {
-  const row = formatRankRow({ ...player, gameId: 'LONG NAME #0147', tag: '0147' });
-  assert.equal(row.name, 'LONG NAME');
+  const row = formatRankRow({ ...player, gameId: 'longname #0147', tag: '0147' });
+  assert.equal(row.name, 'LONGNAME');
   assert.equal(row.tag, '#0147');
-  assert.equal(row.identifier, 'LONG NAME#0147');
+  assert.equal(row.identifier, 'LONGNAME#0147');
   assert.equal(formatRankRow({ ...player, gameId: 'SHAWN#1477' }).name, 'SHAWN');
   assert.equal(formatRankRow({ ...player, gameId: 'SHAWN#1477' }).identifier, 'SHAWN#1477');
 });
@@ -95,7 +95,7 @@ test('followed-list ranks use explicit followRank without inferring a nationalit
 
 test('comparison and missing-baseline renders are scaled JPEGs and preserve input order', async () => {
   const rows = [
-    { ...player, gameId: '中文长名字 / A PLAYER NAME THAT WRAPS WITHOUT HIDING THE ID', current: null },
+    { ...player, gameId: 'LONGNAME1234', current: null },
     player,
     { ...player, playerKey: 'FOREIGN#1477', gameId: 'FOREIGN', current: { ...player.current, worldRank: 20, countryRank: null }, previous: null },
   ];
@@ -105,7 +105,7 @@ test('comparison and missing-baseline renders are scaled JPEGs and preserve inpu
   const image = await loadImage(bytes);
   assert.equal(Buffer.isBuffer(bytes), true);
   assert.equal(image.width, RANK_IMAGE_WIDTH);
-  assert.equal(image.width,1200);
+  assert.equal(image.width,1115);
   assert.ok(image.height >= Math.round(580*2/3));
   assert.equal(JSON.stringify(rows), before);
   const noHistory = await loadImage(await renderRankComparison({ current: { ...snapshot, kind: 'manual' }, previous: null, rows }));

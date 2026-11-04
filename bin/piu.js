@@ -101,11 +101,17 @@ async function main() {
     finally { await service.close(); }
     return;
   }
-  if (command === 'ids' || command === 'list') {
+  if (['ids', 'list', 'refresh', 'default'].includes(command)) {
     const service = await createService(loadConfig());
     try {
-      const rows = await service.gameIds(args[0] || 'local');
-      console.log(JSON.stringify(rows.map(row => ({account: row.account, gameId: `${row.gameId}${row.tag}`, pumbility: row.pumbility, recordCount: row.recordCount, selected: row.selected, authExpired: Boolean(row.authExpired)})), null, 2));
+      const user = args[0] || 'local';
+      if (command === 'default' || (['ids','list'].includes(command) && args[1])) {
+        const selected = await service.setDefault(user, args.slice(1).join(' '));
+        console.log(`默认档案已设为 ${selected.playerName}（序号 ${selected.index}）。`);
+      } else {
+        const rows = await service[command === 'refresh' ? 'refresh' : 'gameIds'](user);
+        console.log(JSON.stringify(rows.map(row => ({index:row.index, isDefault:row.isDefault, account:row.account, gameId:row.playerName, pumbility:row.pumbility, recordCount:row.recordCount, cachedAt:row.cachedAt, authExpired:Boolean(row.authExpired)})),null,2));
+      }
     }
     finally { await service.close(); }
     return;
@@ -129,17 +135,20 @@ async function main() {
     '  node bin/piu.js parse pumbility.html profile.json',
     '  node bin/piu.js login-local [user]',
     '  node bin/piu.js serve [user]',
-    '  node bin/piu.js list [user]',
-    '  node bin/piu.js fetch [user] [out.jpg] [名称#标签，如 ZANTING#9403]',
-    '  node bin/piu.js recent [user] [out.jpg] [名称#标签，如 ZANTING#9403]',
-    '  node bin/piu.js data [user] [out.jpg] [名称#标签，如 ZANTING#9403]',
+    '  node bin/piu.js list [user] [默认档案序号]',
+    '  node bin/piu.js default [user] <档案序号>',
+    '  node bin/piu.js refresh [user]',
+    '  node bin/piu.js fetch [user] [out.jpg] [序号 / 唯一名称 / #标签 / 完整标识]',
+    '  node bin/piu.js recent [user] [out.jpg] [序号 / 唯一名称 / #标签 / 完整标识]',
+    '  node bin/piu.js data [user] [out.jpg] [序号 / 唯一名称 / #标签 / 完整标识]',
     '  node bin/piu.js rank-login-local',
     '  node bin/piu.js rank-capture | rank-daemon | rank-dates | rank-audit | rank-prefetch',
     '  node bin/piu.js rank-follow owner SHAWN#1477 YINYBEST#3231 CHIPHANT#5633',
     '  node bin/piu.js rank-unfollow owner SHAWN#1477',
     '  node bin/piu.js rank owner [YYYYMMDD YYYYMMDD] [out.jpg]',
     '  node bin/piu.js rank-preview owner [YYYYMMDD] [out.jpg]',
-    '  未指定 B50 / recent / data 档案时生成首个有效账号的首个档案；不接受纯名称、纯标签或 uid。',
+    '  未指定 B50 / recent / data 档案时生成本地保存的默认档案；list 仅读本地缓存，refresh 才刷新。',
+    '  档案名称仅限 1–12 位英文字母或数字，不含空格，大小写不敏感。',
   ].join('\n'));
 }
 main().catch(error => {

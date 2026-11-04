@@ -23,13 +23,13 @@ test('normalization preserves order, missing data, and 50-record cap without der
 });
 test('renderer makes a scaled JPEG and never fetches arbitrary image sources by default', async () => {
   assert.equal(CARD_WIDTH / CARD_HEIGHT, 600 / 260, 'cards retain the supplied reference proportions');
-  const jpeg = await renderBest50({playerName:'中文测试 / PIU', records:[{title:'A very long title ' .repeat(12), jacket:'https://127.0.0.1/private', rating:300, grade:'S+'}]});
+  const jpeg = await renderBest50({playerName:'PLAYER1#1234', records:[{title:'A very long title ' .repeat(12), jacket:'https://127.0.0.1/private', rating:300, grade:'S+'}]});
   assert.equal(jpeg.readUInt16BE(0), 0xffd8);
   const image = await loadImage(jpeg);
   assert.equal(image.width, IMAGE_WIDTH);
   assert.equal(image.height, IMAGE_HEIGHT);
   assert.equal(image.width, 2160);
-  assert.equal(image.height, 2223);
+  assert.equal(image.height, 2308);
 });
 test('official navigation allowlist rejects credential URLs, foreign hosts, non-HTTPS and nonstandard ports', () => {
   assert.ok(isOfficialUrl('https://api.am-pass.net/sso'));

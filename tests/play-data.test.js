@@ -35,6 +35,12 @@ test('Play Data retains all Grade and Plate counts, totals and profile without s
   assert.match(profile.playCountNote,/Freeplay/);
   assert.equal(profile.pumbility,null);
 });
+test('Play Data canonicalizes valid profile names and rejects forbidden name characters',()=>{
+  assert.equal(parsePlayData(dataPage({name:' \talPha \n # 1001 '})).playerName,'ALPHA#1001');
+  for(const name of ['A B#1001','A\tB#1001','A\nB#1001','ABCDEFGHIJKLM#1001','ALPHA_#1001','名字#1001','ＡLPHA#1001']){
+    assert.throws(()=>parsePlayData(dataPage({name})),{code:'GAME_ID_FORMAT'});
+  }
+});
 test('Play Data fails on expired login, absent rows, duplicates and invalid counts',()=>{
   assert.throws(()=>parsePlayData('<form id="login_fs"><input name="mb_password"></form>'),{code:'AUTH_REQUIRED'});
   assert.throws(()=>parsePlayData('<h1>maintenance</h1>'),{code:'PAGE_CHANGED'});
@@ -50,10 +56,10 @@ test('Play Data renders original badges and safe zero counts into a complete ima
   const image=await loadImage(jpeg);
   assert.equal(image.width,DATA_IMAGE_WIDTH);
   assert.equal(image.width,1200);
-  assert.equal(image.height,1053);
+  assert.equal(image.height,1139);
 });
 
-function account({initial='222',broken=false,mismatch=false,redirected=false}={}) {
+function account({initial='222',broken=false,mismatch=false,redirected=false,lowercaseData=false}={}) {
   let active=initial,location='about:blank',closed=false;
   const switches=[],cards=[{id:'111',name:'ALPHA #1001'},{id:'222',name:'BETA #2002'}];
   const page={
@@ -61,7 +67,7 @@ function account({initial='222',broken=false,mismatch=false,redirected=false}={}
     async goto(url){location=redirected&&url.includes('play_data.php')?'https://www.piugame.com/bbs/login.php':url;return {ok:()=>true};},
     async content(){
       const card=cards.find(item=>item.id===active);
-      if(location.includes('play_data.php'))return broken?'<h1>maintenance</h1>':dataPage({name:mismatch?'EXTERNAL #9999':card.name});
+      if(location.includes('play_data.php'))return broken?'<h1>maintenance</h1>':dataPage({name:mismatch?'EXTERNAL #9999':lowercaseData?card.name.toLowerCase():card.name});
       return `<div class="subProfile_wrap"><div class="name_w"><p class="t2">${card.name}</p></div></div>
         <div id="profile_modal">${cards.map(item=>`<div class="in_profile"><input name="sub_profile" value="${item.id}" ${item.id===active?'checked':''}>
         <div class="name_w"><p class="t2">${item.name}</p></div></div>`).join('')}</div><div class="pumbility_total_wrap"><div class="score">0</div></div>`;
@@ -93,4 +99,11 @@ test('Play Data restores the prior profile after bad pages, mismatched identitie
     assert.deepEqual(current.switches,['111','222']);
     assert.equal(current.active(),'222');assert.equal(current.closed(),true);
   }
+});
+test('Play Data and Pumbility profile headers compare using canonical uppercase identities',async()=>{
+  const current=account({initial:'111',lowercaseData:true});
+  const result=await fetchPlayData(current.manager,{}, {gameId:'bEtA#2002'});
+  assert.equal(result.profile.playerName,'BETA#2002');
+  assert.deepEqual(current.switches,['222','111']);
+  assert.equal(current.active(),'111');assert.equal(current.closed(),true);
 });

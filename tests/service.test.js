@@ -12,9 +12,12 @@ function gate() {
 const state = label => ({cookies: [{name: 'sid', domain: '.piugame.com', path: '/', value: label}], origins: []});
 const ids = [{id: 'bound', uid: 'uid1', playerName: 'ZANTING#9403', gameId: 'ZANTING', tag: '#9403', selected: true, pumbility: 17841.83, recordCount: 50}];
 const loginProfile = {playerName: 'ZANTING#9403', gameIds: ids};
+const otherIds = [...ids, {id:'other', playerName:'OTHER#1111', gameId:'OTHER', tag:'#1111', selected:false, pumbility:100, recordCount:1}];
 const firstState = saved => accountBindings(saved).accounts[0].state;
 async function fixture(t, overrides = {}) {
-  const records = overrides.records ?? new Map([['owner', {state: state('old'), savedAt: Date.now()}]]);
+  const cachedIds = overrides.cachedIds ?? ids;
+  const boundProfile = {...loginProfile, gameIds:cachedIds};
+  const records = overrides.records ?? new Map([['owner', {version:2, accounts:[{id:'primary', state:state('old'), savedAt:Date.now(), profilesUpdatedAt:Date.now(), gameIds:structuredClone(cachedIds)}]}]]);
   const calls = {fetch: [], recent: [], data: [], ids: 0, saves: [], deletes: [], imports: [], closes: 0, revokes: []};
   let callbacks;
   const vault = {
@@ -30,10 +33,10 @@ async function fixture(t, overrides = {}) {
     }},
     readProfile: async (page, options) => {
       assert.equal(options.paginate, false);
-      const profile = overrides.onValidate ? await overrides.onValidate(page) : loginProfile;
-      return profile ? {...profile, gameIds: profile.gameIds ?? ids} : profile;
+      const profile = overrides.onValidate ? await overrides.onValidate(page) : boundProfile;
+      return profile ? {...profile, gameIds: profile.gameIds ?? cachedIds} : profile;
     },
-    createBridge: async options => { callbacks = {...options, saveSession: (key, saved, profile = loginProfile) => options.saveSession(key, saved, profile)}; return {async createTicket() {
+    createBridge: async options => { callbacks = {...options, saveSession: (key, saved, profile = boundProfile) => options.saveSession(key, saved, profile)}; return {async createTicket() {
       if (overrides.onTicket) await overrides.onTicket();
       return {url: 'http://localhost/login', expiresAt: overrides.ticketExpiresAt ?? Date.now() + 300000};
     }, async revoke(key) { calls.revokes.push(key); }, async close() {}}; },
@@ -55,7 +58,7 @@ async function fixture(t, overrides = {}) {
     fetchGameIds: async (_browser, saved) => {
       calls.ids++;
       const custom = overrides.onIds ? await overrides.onIds(saved) : null;
-      return {gameIds: custom ?? ids, state: saved};
+      return {gameIds: custom ?? cachedIds, state: saved};
     },
     renderBest50: async profile => Buffer.from(profile.label),
     renderRecent: async profile => Buffer.from(`recent:${profile.label}`),
@@ -65,48 +68,53 @@ async function fixture(t, overrides = {}) {
   return {service, records, calls, callbacks};
 }
 
-test('bare b50 uses first card and explicit selectors require complete name and tag', async t => {
+test('default b50 and equivalent cached selectors use one full-ID fetch and image cache', async t => {
   const f = await fixture(t);
   const first = await f.service.best50('owner');
-  assert.equal(first.toString(), 'old:current');
-  assert.strictEqual(await f.service.best50('owner', ''), first);
-  const named = await f.service.best50('owner', '  ZANTING   #9403 ');
-  assert.equal(named.toString(), 'old:ZANTING#9403');
-  assert.strictEqual(await f.service.best50('owner', 'ZANTING#9403'), named);
-  for (const input of ['ZANTING', '#9403', '9403', 'uid1', 'uid2', '__first__']) {
+  assert.equal(first.toString(), 'old:ZANTING#9403');
+  for (const input of ['', '  ZANTING   #9403 ', 'ZANTING', '#9403', '1']) {
+    assert.strictEqual(await f.service.best50('owner', input), first);
+  }
+  for (const input of ['0', '01', 'NAME##1234', '__first__']) {
     await assert.rejects(f.service.best50('owner', input), {code: 'GAME_ID_FORMAT'});
   }
+  for (const input of ['9403', 'uid1', 'uid2', 'FOREIGN#1234']) {
+    await assert.rejects(f.service.best50('owner', input), {code: 'GAME_ID_NOT_FOUND'});
+  }
   assert.strictEqual(await f.service.best50('owner'), first);
-  assert.deepEqual(f.calls.fetch, ['', 'ZANTING#9403']);
+  assert.deepEqual(f.calls.fetch, ['ZANTING#9403']);
+  assert.equal(f.calls.ids, 0);
   await assert.rejects(f.service.best50('another', 'ZANTING#9403'), {code: 'AUTH_REQUIRED'});
 });
 
-test('recent uses its own cache, validates full IDs, and requires a bound personal session', async t => {
+test('recent shares equivalent profile selectors, keeps its own cache and requires a bound session', async t => {
   const f = await fixture(t);
   const best = await f.service.best50('owner');
   const recent = await f.service.recent('owner');
-  assert.equal(recent.toString(), 'recent:old:current');
-  assert.strictEqual(await f.service.recent('owner'), recent);
+  assert.equal(recent.toString(), 'recent:old:ZANTING#9403');
+  for (const selector of ['', '1', 'ZANTING', '#9403', 'ZANTING#9403']) {
+    assert.strictEqual(await f.service.recent('owner',selector), recent);
+  }
   assert.strictEqual(await f.service.best50('owner'), best);
-  assert.equal((await f.service.recent('owner','ZANTING#9403')).toString(), 'recent:old:ZANTING#9403');
-  assert.deepEqual(f.calls.recent, ['', 'ZANTING#9403']);
-  for (const selector of ['#9403','ZANTING','uid1']) await assert.rejects(f.service.recent('owner',selector), {code:'GAME_ID_FORMAT'});
+  assert.deepEqual(f.calls.recent, ['ZANTING#9403']);
+  await assert.rejects(f.service.recent('owner','uid1'), {code:'GAME_ID_NOT_FOUND'});
   await assert.rejects(f.service.recent('another'), {code:'AUTH_REQUIRED'});
   await f.service.unbind('owner');
   await assert.rejects(f.service.recent('owner'), {code:'AUTH_REQUIRED'});
 });
 
-test('Play Data requires a bound session and has a separate per-profile image cache',async t=>{
+test('Play Data requires a bound session and retains a separate cache for the resolved profile',async t=>{
   const f=await fixture(t);
   const best=await f.service.best50('owner'),recent=await f.service.recent('owner'),data=await f.service.data('owner');
-  assert.equal(data.toString(),'data:old:current');
-  assert.strictEqual(await f.service.data('owner'),data);
+  assert.equal(data.toString(),'data:old:ZANTING#9403');
+  for (const selector of ['', '1', '#9403', 'ZANTING', 'ZANTING#9403']) {
+    assert.strictEqual(await f.service.data('owner',selector),data);
+  }
   assert.strictEqual(await f.service.best50('owner'),best);
   assert.strictEqual(await f.service.recent('owner'),recent);
-  assert.equal((await f.service.data('owner','ZANTING#9403')).toString(),'data:old:ZANTING#9403');
-  assert.deepEqual(f.calls.data,['','ZANTING#9403']);
+  assert.deepEqual(f.calls.data,['ZANTING#9403']);
   await assert.rejects(f.service.data('other'),{code:'AUTH_REQUIRED'});
-  await assert.rejects(f.service.data('owner','#9403'),{code:'GAME_ID_FORMAT'});
+  await assert.rejects(f.service.data('owner','#123'),{code:'GAME_ID_FORMAT'});
   await f.service.unbind('owner');
   await assert.rejects(f.service.data('owner'),{code:'AUTH_REQUIRED'});
 });
@@ -119,42 +127,47 @@ test('Play Data locks account switching against B50, recent and listing',async t
   await assert.rejects(f.service.best50('owner'),{code:'BUSY'});
   await assert.rejects(f.service.recent('owner'),{code:'BUSY'});
   await assert.rejects(f.service.gameIds('owner'),{code:'BUSY'});
+  await assert.rejects(f.service.refresh('owner'),{code:'BUSY'});
+  await assert.rejects(f.service.setDefault('owner','1'),{code:'BUSY'});
   blocked.release();
   const [left,right]=await Promise.all([data,same]);
   assert.strictEqual(left,right);
 });
 
-test('recent shares the account-switch lock with B50 and merges identical in-flight recent requests', async t => {
+test('recent locks other profile and image queries while equivalent selectors share the in-flight task', async t => {
   const blocked = gate();
-  const f = await fixture(t, {onRecent:async()=>{blocked.start();await blocked.waiting;}});
+  const f = await fixture(t, {cachedIds:otherIds, onRecent:async()=>{blocked.start();await blocked.waiting;}});
   await f.service.best50('owner');
   const recent = f.service.recent('owner');
   await blocked.ready;
-  const same = f.service.recent('owner');
+  const same = f.service.recent('owner','#9403');
   await assert.rejects(f.service.best50('owner'), {code:'BUSY'});
   await assert.rejects(f.service.gameIds('owner'), {code:'BUSY'});
-  await assert.rejects(f.service.recent('owner','ZANTING#9403'), {code:'BUSY'});
+  await assert.rejects(f.service.recent('owner','OTHER#1111'), {code:'BUSY'});
   blocked.release();
   const [left,right] = await Promise.all([recent,same]);
   assert.strictEqual(left,right);
-  assert.deepEqual(f.calls.recent, ['']);
+  assert.deepEqual(f.calls.recent,['ZANTING#9403']);
 });
 
-test('repeated bare b50 calls share an in-flight first-card request', async t => {
+test('default and explicit b50 selectors share an in-flight resolved-profile request', async t => {
   const blocked = gate();
-  const f = await fixture(t, {onFetch: async selector => { if (selector === '') { blocked.start(); await blocked.waiting; } }});
+  const f = await fixture(t, {onFetch:async selector=>{
+    assert.equal(selector,'ZANTING#9403');blocked.start();await blocked.waiting;
+  }});
   const first = f.service.best50('owner');
   await blocked.ready;
-  const same = f.service.best50('owner', '');
+  const same = f.service.best50('owner','1');
+  const named = f.service.best50('owner','ZANTING#9403');
   blocked.release();
-  const [left, right] = await Promise.all([first, same]);
-  assert.strictEqual(left, right);
-  assert.deepEqual(f.calls.fetch, ['']);
+  const [left,right,third] = await Promise.all([first,same,named]);
+  assert.strictEqual(left,right);assert.strictEqual(left,third);
+  assert.deepEqual(f.calls.fetch,['ZANTING#9403']);
 });
 
 test('same image query reuses a task while another selector, cached card, or listing is busy', async t => {
   const blocked = gate();
-  const f = await fixture(t, {onFetch: async selector => { if (selector === 'ZANTING#9403') { blocked.start(); await blocked.waiting; } }});
+  const f = await fixture(t, {cachedIds:otherIds, onFetch: async selector => { if (selector === 'ZANTING#9403') { blocked.start(); await blocked.waiting; } }});
   await f.service.best50('owner', 'OTHER#1111');
   const first = f.service.best50('owner', 'ZANTING#9403');
   await blocked.ready;
@@ -168,37 +181,48 @@ test('same image query reuses a task while another selector, cached card, or lis
   assert.deepEqual(f.calls.fetch, ['OTHER#1111', 'ZANTING#9403']);
 });
 
-test('listing shares the account lock, caches all card summaries, and returns independent snapshots', async t => {
+test('explicit refresh shares the account lock and returns data that later local lists independently clone', async t => {
   const blocked = gate();
-  const f = await fixture(t, {onIds: async () => { blocked.start(); await blocked.waiting; }});
-  const first = f.service.gameIds('owner');
+  const f = await fixture(t,{onIds:async()=>{blocked.start();await blocked.waiting;}});
+  const first = f.service.refresh('owner');
   await blocked.ready;
-  const same = f.service.gameIds('owner');
-  await assert.rejects(f.service.best50('owner', 'ZANTING#9403'), {code: 'BUSY'});
+  const same = f.service.refresh('owner');
+  const joiningList = f.service.gameIds('owner');
+  await assert.rejects(f.service.best50('owner','ZANTING#9403'),{code:'BUSY'});
+  await assert.rejects(f.service.setDefault('owner','1'),{code:'BUSY'});
   blocked.release();
-  const [left, right] = await Promise.all([first, same]);
-  assert.equal(left[0].pumbility, 17841.83);
-  assert.equal(left[0].uid, 'uid1');
-  assert.deepEqual(left, right);
-  left[0].playerName = 'modified';
-  const cached = await f.service.gameIds('owner');
-  assert.equal(cached[0].playerName, 'ZANTING#9403');
-  assert.equal(f.calls.ids, 1);
+  const [left,right,joined] = await Promise.all([first,same,joiningList]);
+  assert.equal(left[0].pumbility,17841.83);assert.equal(left[0].uid,'uid1');
+  assert.deepEqual(left,right);assert.deepEqual(left,joined);
+  left[0].playerName='modified';
+  const local=await f.service.gameIds('owner');
+  assert.equal(local[0].playerName,'ZANTING#9403');
+  local[0].playerName='also modified';
+  assert.equal((await f.service.gameIds('owner'))[0].playerName,'ZANTING#9403');
+  assert.equal(f.calls.ids,1);
 });
 
-test('a fresh list invalidates the first-card default while preserving complete identity images', async t => {
-  const f = await fixture(t);
-  await f.service.best50('owner');
-  const named = await f.service.best50('owner', 'ZANTING#9403');
+test('local list preserves every picture cache and only explicit refresh invalidates it', async t => {
+  const f=await fixture(t);
+  const best=await f.service.best50('owner');
+  const recent=await f.service.recent('owner');
+  const data=await f.service.data('owner');
   await f.service.gameIds('owner');
-  assert.strictEqual(await f.service.best50('owner', 'ZANTING#9403'), named);
-  await f.service.best50('owner');
-  assert.deepEqual(f.calls.fetch, ['', 'ZANTING#9403', '']);
+  assert.strictEqual(await f.service.best50('owner','ZANTING#9403'),best);
+  assert.strictEqual(await f.service.recent('owner','#9403'),recent);
+  assert.strictEqual(await f.service.data('owner','1'),data);
+  assert.equal(f.calls.ids,0);
+  await f.service.refresh('owner');
+  assert.notStrictEqual(await f.service.best50('owner'),best);
+  assert.notStrictEqual(await f.service.recent('owner'),recent);
+  assert.notStrictEqual(await f.service.data('owner'),data);
+  assert.deepEqual(f.calls.fetch,['ZANTING#9403','ZANTING#9403']);
+  assert.equal(f.calls.ids,1);
 });
 
-test('unbind waits for in-flight fetch then removes every card and summary cache', async t => {
+test('unbind waits for in-flight fetch then removes persisted profiles and every picture cache', async t => {
   const blocked = gate();
-  const f = await fixture(t, {onFetch: async selector => { if (selector === 'ZANTING#9403') { blocked.start(); await blocked.waiting; } }});
+  const f = await fixture(t, {cachedIds:otherIds, onFetch: async selector => { if (selector === 'ZANTING#9403') { blocked.start(); await blocked.waiting; } }});
   await f.service.best50('owner', 'OTHER#1111');
   await f.service.gameIds('owner');
   const fetching = f.service.best50('owner', 'ZANTING#9403');
@@ -215,9 +239,9 @@ test('unbind waits for in-flight fetch then removes every card and summary cache
   await assert.rejects(f.service.gameIds('owner'), {code: 'AUTH_REQUIRED'});
 });
 
-test('rebind waits for pending fetch and clears card images plus the full account summary', async t => {
+test('rebind waits for pending fetch and refreshes the local profile metadata and image caches', async t => {
   const blocked = gate();
-  const f = await fixture(t, {onFetch: async selector => { if (selector === 'ZANTING#9403') { blocked.start(); await blocked.waiting; } }});
+  const f = await fixture(t, {cachedIds:otherIds, onFetch: async selector => { if (selector === 'ZANTING#9403') { blocked.start(); await blocked.waiting; } }});
   await f.service.best50('owner', 'OTHER#1111');
   await f.service.gameIds('owner');
   const fetching = f.service.best50('owner', 'ZANTING#9403');
@@ -229,7 +253,7 @@ test('rebind waits for pending fetch and clears card images plus the full accoun
   await rebinding;
   assert.equal((await f.service.best50('owner', 'OTHER#1111')).toString(), 'new:OTHER#1111');
   await f.service.gameIds('owner');
-  assert.equal(f.calls.ids, 2);
+  assert.equal(f.calls.ids, 0);
   assert.equal((await f.service.best50('owner', 'ZANTING#9403')).toString(), 'new:ZANTING#9403');
 });
 
@@ -284,14 +308,14 @@ test('Cookie import verifies first, saves refreshed PIU state, clears caches and
   const f = await fixture(t, {importedState: refreshed, onValidate: async page => {
     assert.equal(page.saved.cookies[0].value, 'submitted');
     assert.equal(firstState(f.records.get('owner')).cookies[0].value, 'old');
-    return {playerName: 'IMPORTED#1234'};
+    return loginProfile;
   }});
   const cached = await f.service.best50('owner');
   await f.service.gameIds('owner');
   let authorized = 0;
   await f.service.login('owner', {onBoundSession: async () => { authorized++; }});
   const profile = await f.service.importCookies('owner', 'sid=submitted');
-  assert.equal(profile.playerName, 'IMPORTED#1234');
+  assert.equal(profile.playerName, loginProfile.playerName);
   assert.equal(firstState(f.records.get('owner')).cookies[0].value, 'refreshed');
   assert.equal(firstState(f.records.get('owner')).cookies.length, 1);
   assert.deepEqual(f.calls.revokes, ['owner']);
@@ -299,7 +323,7 @@ test('Cookie import verifies first, saves refreshed PIU state, clears caches and
   assert.equal(authorized, 0);
   assert.notStrictEqual(await f.service.best50('owner'), cached);
   await f.service.gameIds('owner');
-  assert.equal(f.calls.ids, 2);
+  assert.equal(f.calls.ids, 0);
   await f.callbacks.saveSession('owner', state('later'));
   assert.equal(authorized, 0);
 });
@@ -321,10 +345,10 @@ test('invalid or rejected Cookie imports preserve the existing session and cache
 
 test('Cookie validation holds account and fetch limits while unbind waits and cannot resurrect the session', async t => {
   const blocked = gate();
-  const f = await fixture(t, {onValidate: async () => { blocked.start(); await blocked.waiting; return {playerName: 'IMPORTED#1234'}; }});
+  const f = await fixture(t, {onValidate: async () => { blocked.start(); await blocked.waiting; return loginProfile; }});
   const importing = f.service.importCookies('owner', 'sid=submitted');
   await blocked.ready;
-  for (const task of [f.service.best50('owner'), f.service.recent('owner'), f.service.gameIds('owner'), f.service.login('owner'), f.service.importCookies('owner', 'sid=other')]) {
+  for (const task of [f.service.best50('owner'), f.service.recent('owner'), f.service.data('owner'), f.service.gameIds('owner'), f.service.refresh('owner'), f.service.setDefault('owner','1'), f.service.login('owner'), f.service.importCookies('owner', 'sid=other')]) {
     await assert.rejects(task, {code: 'BUSY'});
   }
   const unbinding = f.service.unbind('owner');
@@ -375,7 +399,7 @@ const secondIds = [{id:'other-bound', uid:'uid1', playerName:'SECOND#2222', game
 const secondProfile = {playerName:'SECOND#2222', gameIds:secondIds};
 const accountIds = saved => saved.cookies[0].value.startsWith('second') ? secondIds : ids;
 
-test('QR binding adds another account, migrates legacy storage and merges every profile', async t => {
+test('QR binding adds another cached account and merges every profile without fetching other accounts', async t => {
   const f = await fixture(t, {onIds:accountIds});
   await f.callbacks.saveSession('owner', state('second'), secondProfile);
   const saved = f.records.get('owner');
@@ -384,7 +408,7 @@ test('QR binding adds another account, migrates legacy storage and merges every 
   assert.equal(saved.accounts[0].state.cookies[0].value, 'old');
   const merged = await f.service.gameIds('owner');
   assert.deepEqual(merged.map(row => [row.playerName,row.account]), [['ZANTING#9403',1],['SECOND#2222',2]]);
-  assert.equal((await f.service.best50('owner')).toString(), 'old:current');
+  assert.equal((await f.service.best50('owner')).toString(), 'old:ZANTING#9403');
   for (const [method,prefix] of [['best50',''],['recent','recent:'],['data','data:']]) {
     assert.equal((await f.service[method]('owner','SECOND#2222')).toString(), `${prefix}second:SECOND#2222`);
   }
@@ -432,8 +456,8 @@ test('expired accounts are marked while healthy accounts remain usable, and unbi
   assert.equal(rows.length,2);
   assert.equal(rows[0].authExpired,true);
   assert.equal(rows[1].authExpired,undefined);
-  assert.equal(f.calls.ids,1);
-  assert.equal((await f.service.best50('owner')).toString(),'second:current');
+  assert.equal(f.calls.ids,0);
+  assert.equal((await f.service.best50('owner')).toString(),'second:SECOND#2222');
   await assert.rejects(f.service.best50('owner','ZANTING#9403'),{code:'AUTH_REQUIRED'});
   assert.equal((await f.service.best50('owner','SECOND#2222')).toString(),'second:SECOND#2222');
   await f.service.unbind('owner');
@@ -442,13 +466,21 @@ test('expired accounts are marked while healthy accounts remain usable, and unbi
   await assert.rejects(f.service.best50('owner','SECOND#2222'),{code:'AUTH_REQUIRED'});
 });
 
-test('an unavailable legacy session cannot prevent adding a healthy account', async t => {
-  const f = await fixture(t,{onIds:async saved => {
-    if(saved.cookies[0].value==='old') throw new PiuError('AUTH_REQUIRED','expired');
+test('binding keeps an unknown legacy cache untouched until an explicit refresh checks that account', async t => {
+  const records=new Map([['owner',{state:state('old'),savedAt:Date.now()}]]);
+  const f=await fixture(t,{records,onIds:async saved=>{
+    if(saved.cookies[0].value==='old')throw new PiuError('AUTH_REQUIRED','expired');
     return secondIds;
   }});
+  await assert.rejects(f.service.gameIds('owner'),{code:'GAME_ID_CACHE_MISSING'});
+  assert.equal(f.calls.ids,0);
   await f.callbacks.saveSession('owner',state('second'),secondProfile);
   assert.equal(f.records.get('owner').accounts.length,2);
   assert.deepEqual((await f.service.gameIds('owner')).map(row=>row.playerName),['SECOND#2222']);
+  assert.equal(f.records.get('owner').accounts[0].authExpired,undefined);
+  assert.equal(f.calls.ids,0);
+  await f.service.refresh('owner');
+  assert.equal(f.calls.ids,2);
   assert.equal(f.records.get('owner').accounts[0].authExpired,true);
+  assert.equal((await f.service.best50('owner')).toString(),'second:SECOND#2222');
 });

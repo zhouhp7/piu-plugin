@@ -35,6 +35,15 @@ const image = buffer => globalThis.segment?.image(buffer) ?? {type: 'image', fil
 const message = event => String(event.msg ?? event.raw_message ?? '');
 const followNames = entries => entries.map(entry => `${entry.gameId}${entry.tag}`).join('\n');
 const followLabel = event => event.isGroup || event.group_id != null || event.group?.group_id != null ? '本群' : '自己';
+const profileName = profile => (profile.playerName || `${profile.gameId || 'GAME ID'}${profile.tag || ''}`).replace(/\s*#\s*/, '#');
+function profileList(ids, heading = '自己的 PIU 档案（本地缓存）') {
+  if (!ids.length) return `${heading}\n本地尚无档案，请先 #piu login 绑定账号；已绑定时可用 #piu refresh 更新档案缓存。`;
+  const rows = ids.map((item, index) => {
+    const score = item.pumbility == null ? NaN : Number(item.pumbility);
+    return `${item.index ?? index + 1}. ${profileName(item)}${item.isDefault ? '【默认】' : ''}${item.account ? `（账号 ${item.account}）` : ''}${item.authExpired ? ' · 登录已失效，请重新绑定该账号' : ''} · Pumbility ${Number.isFinite(score) ? score.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '—'} · ${Number.isInteger(item.recordCount) ? item.recordCount : '—'} 条成绩`;
+  });
+  return `${heading}\n${rows.join('\n')}\n#piu default 序号 或 #piu list 序号 设置默认档案。b50 / recent / data 可用序号、唯一名称、#标签或完整 名称#标签；不填时使用默认档案。\n列表只读取本地缓存；#piu refresh 从官网更新本地档案缓存。`;
+}
 
 export class PiuBest50 extends plugin {
   constructor() {
@@ -44,7 +53,9 @@ export class PiuBest50 extends plugin {
         {reg: '^#?(?:piu|PIU)\\s*(?:b50|B50|best50|Best50)(?:\\s+[^@\\r\\n]{1,160})?\\s*$', fnc: 'best50'},
         {reg: '^#?(?:piu|PIU)\\s*(?:recent|RECENT)(?:\\s+[^@\\r\\n]{1,160})?\\s*$', fnc: 'recent'},
         {reg: '^#?(?:piu|PIU)\\s*(?:data|DATA)(?:\\s+[^@\\r\\n]{1,160})?\\s*$', fnc: 'playData'},
-        {reg: '^#?(?:piu|PIU)\\s*(?:list|LIST|账号|游戏ID|游戏id|ids|IDS)$', fnc: 'gameIds'},
+        {reg: '^#?(?:piu|PIU)\\s*(?:list|LIST|账号|游戏ID|游戏id|ids|IDS)(?:\\s+[^@\\r\\n]{1,160})?\\s*$', fnc: 'gameIds'},
+        {reg: '^#?(?:piu|PIU)\\s*(?:default|DEFAULT)(?:\\s+[^@\\r\\n]{1,160})?\\s*$', fnc: 'defaultProfile'},
+        {reg: '^#?(?:piu|PIU)\\s*(?:refresh|REFRESH)\\s*$', fnc: 'refresh'},
         {reg: '^#?(?:piu|PIU)\\s*(?:ranklogin|RANKLOGIN)(?:\\s+[\\s\\S]*)?$', fnc: 'rankLogin', permission: 'master'},
         {reg: '^#?(?:piu|PIU)\\s*(?:rank|RANK)(?:\\s+[^\\r\\n]{1,80})?\\s*$', fnc: 'rank'},
         {reg: '^#?(?:piu|PIU)\\s*(?:follow|FOLLOW)(?:\\s+[^\\r\\n]{1,1000})?\\s*$', fnc: 'follow'},
@@ -87,33 +98,47 @@ export class PiuBest50 extends plugin {
   }
   async best50() {
     const selector = String(this.e.msg ?? this.e.raw_message ?? '').replace(/^#?piu\s*(?:b50|best50)/i, '').trim();
-    if (/@|\[CQ:at(?:,|\])/.test(selector) || this.e.at && String(this.e.at) !== String(this.e.self_id ?? this.e.bot?.uin)) return this.reply('请填写自己账号的完整 名称#标签，例如 #piu b50 ZANTING#9403。');
+    if (/@|\[CQ:at(?:,|\])/.test(selector) || this.e.at && String(this.e.at) !== String(this.e.self_id ?? this.e.bot?.uin)) return this.reply('请从 #piu list 选择本人档案，可填写序号、唯一名称、#标签或完整 名称#标签。');
     try { return await this.reply(image(await (await service()).best50(identity(this.e), selector))); }
     catch (error) { return this.reply(publicError(error)); }
   }
   async recent() {
     const selector = message(this.e).replace(/^#?piu\s*recent/i, '').trim();
-    if (/@|\[CQ:at(?:,|\])/.test(selector) || this.e.at && String(this.e.at) !== String(this.e.self_id ?? this.e.bot?.uin)) return this.reply('请填写自己账号的完整 名称#标签，例如 #piu recent ZANTING#9403。');
+    if (/@|\[CQ:at(?:,|\])/.test(selector) || this.e.at && String(this.e.at) !== String(this.e.self_id ?? this.e.bot?.uin)) return this.reply('请从 #piu list 选择本人档案，可填写序号、唯一名称、#标签或完整 名称#标签。');
     try { return await this.reply(image(await (await service()).recent(identity(this.e), selector))); }
     catch (error) { return this.reply(publicError(error)); }
   }
   async playData() {
     const selector = message(this.e).replace(/^#?piu\s*data/i, '').trim();
-    if (/@|\[CQ:at(?:,|\])/.test(selector) || this.e.at && String(this.e.at) !== String(this.e.self_id ?? this.e.bot?.uin)) return this.reply('请填写自己账号的完整 名称#标签，例如 #piu data ZANTING#9403。');
+    if (/@|\[CQ:at(?:,|\])/.test(selector) || this.e.at && String(this.e.at) !== String(this.e.self_id ?? this.e.bot?.uin)) return this.reply('请从 #piu list 选择本人档案，可填写序号、唯一名称、#标签或完整 名称#标签。');
     try { return await this.reply(image(await (await service()).data(identity(this.e), selector))); }
     catch (error) { return this.reply(publicError(error)); }
   }
   async gameIds() {
-    if (this.e.isGroup || this.e.group_id) return this.reply('请私聊机器人发送 #piu list，查看自己账号绑定的全部 名称#标签。');
+    if (this.e.isGroup || this.e.group_id) return this.reply('请私聊机器人发送 #piu list，查看本地档案列表或设置默认档案。');
+    const selector = message(this.e).replace(/^#?piu\s*(?:list\b|ids\b|账号|游戏ID)/i, '').trim();
+    if (selector) return this.chooseDefault(selector);
     try {
       const ids = await (await service()).gameIds(identity(this.e));
-      if (!ids.length) return this.reply('此账号尚未绑定 GAME ID。');
-      const rows = ids.map((item, index) => {
-        const name = (item.playerName || `${item.gameId || 'GAME ID'}${item.tag || ''}`).replace(/\s*#\s*/, '#');
-        const score = Number(item.pumbility);
-        return `${index + 1}. ${name}${item.account ? `（账号 ${item.account}${item.selected ? ' · 官网当前' : ''}）` : item.selected ? '（官网当前）' : ''}${item.authExpired ? ' · 登录已失效，请重新绑定该账号' : ''} · Pumbility ${Number.isFinite(score) ? score.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '暂无'} · ${item.recordCount ?? 0} 条成绩`;
-      });
-      return this.reply(`自己绑定的全部 PIU 档案\n${rows.join('\n')}\n使用 #piu b50 名称#标签 指定档案；#piu b50 默认生成首个有效账号的首个档案。可继续扫码或导入 Cookie 添加其他账号。`);
+      return this.reply(profileList(ids));
+    } catch (error) { return this.reply(publicError(error)); }
+  }
+  async chooseDefault(selector) {
+    if (!/^[1-9]\d*$/.test(selector)) return this.reply('用法：#piu default 序号，或 #piu list 序号；请先用 #piu list 查看档案序号。');
+    try {
+      const selected = await (await service()).setDefault(identity(this.e), selector);
+      return this.reply(`已将 ${profileName(selected)}（序号 ${selected.index ?? selector}）设为默认档案。之后 #piu b50、#piu recent、#piu data 不填参数时使用此档案。`);
+    } catch (error) { return this.reply(publicError(error)); }
+  }
+  async defaultProfile() {
+    if (this.e.isGroup || this.e.group_id) return this.reply('请私聊机器人用 #piu default 序号 设置自己的默认档案。');
+    return this.chooseDefault(message(this.e).replace(/^#?piu\s*default\b/i, '').trim());
+  }
+  async refresh() {
+    if (this.e.isGroup || this.e.group_id) return this.reply('请私聊机器人发送 #piu refresh，刷新自己的档案缓存。');
+    try {
+      const ids = await (await service()).refresh(identity(this.e));
+      return this.reply(profileList(ids, 'PIU 档案缓存已刷新'));
     } catch (error) { return this.reply(publicError(error)); }
   }
   async logout() {

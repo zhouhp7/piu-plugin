@@ -42,6 +42,15 @@ test('recent preserves play order, repeated charts, raw scores, judgements and z
   assert.equal(profile.records[2].plate, 'UG');
 });
 
+test('recent profile names are canonical ASCII while song titles retain spaces and Unicode',()=>{
+  const title='中文歌名 / An Unrestricted Song Title';
+  const profile=parseRecent(document(row({title}),' \talPha\n # 1001 '));
+  assert.equal(profile.playerName,'ALPHA#1001');assert.equal(profile.records[0].title,title);
+  for(const name of ['A B#1001','A\tB#1001','A\nB#1001','ABCDEFGHIJKLM#1001','ALPHA_#1001','名字#1001','ＡLPHA#1001']){
+    assert.throws(()=>parseRecent(document(row(),name)),{code:'GAME_ID_FORMAT'});
+  }
+});
+
 test('recent keeps failed grades, stage breaks and a legitimate zero score distinct', () => {
   const records = parseRecent(document(row({grade:'x_a',plate:null,score:'853,620'}) +
     row({grade:null,plate:null,score:'STAGE BREAK'}) + row({grade:'a',score:'0'}))).records;
@@ -74,7 +83,7 @@ test('recent rejects expired login, changed markup, malformed scores and invalid
   assert.throws(() => parseRecent(document(row().replace('data-th="MISS"','data-th="OTHER"'))), {code:'PAGE_CHANGED'});
 });
 
-function account({initial = '222', broken = false, mismatch = false, redirected = false} = {}) {
+function account({initial = '222', broken = false, mismatch = false, redirected = false, lowercaseRecent = false} = {}) {
   let active = initial, location = 'about:blank', closed = false;
   const switches = [];
   const cards = [{id:'111',name:'ALPHA #1001'},{id:'222',name:'BETA #2002'}];
@@ -83,7 +92,7 @@ function account({initial = '222', broken = false, mismatch = false, redirected 
     async goto(url) {location = redirected && url.includes('recently_played') ? 'https://www.piugame.com/bbs/login.php' : url; return {ok:()=>true};},
     async content() {
       const current = cards.find(card => card.id === active);
-      if (location.includes('recently_played')) return broken ? '<h1>maintenance</h1>' : document(row(), mismatch ? 'OUTSIDE #9999' : current.name);
+      if (location.includes('recently_played')) return broken ? '<h1>maintenance</h1>' : document(row(), mismatch ? 'OUTSIDE #9999' : lowercaseRecent ? current.name.toLowerCase() : current.name);
       return `<div class="subProfile_wrap"><div class="name_w"><p class="t2">${current.name}</p></div></div>
         <div id="profile_modal">${cards.map(card => `<div class="in_profile"><input name="sub_profile" value="${card.id}" ${card.id===active?'checked':''}>
           <div class="name_w"><p class="t2">${card.name}</p></div></div>`).join('')}</div>
@@ -124,4 +133,12 @@ test('recent restores selection on failed parsing, wrong profile and login redir
     assert.equal(current.active(), '222');
     assert.equal(current.closed(), true);
   }
+});
+
+test('recent can query lowercase full IDs and compare differently cased official headers safely',async()=>{
+  const current=account({initial:'111',lowercaseRecent:true});
+  const result=await fetchRecent(current.manager,{}, {gameId:'bEtA#2002'});
+  assert.equal(result.profile.playerName,'BETA#2002');
+  assert.deepEqual(current.switches,['222','111']);
+  assert.equal(current.active(),'111');assert.equal(current.closed(),true);
 });

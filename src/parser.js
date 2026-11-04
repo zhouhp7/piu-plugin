@@ -1,5 +1,6 @@
 import { load } from 'cheerio';
 import { PiuError } from './errors.js';
+import {parseProfileMeta} from './profile-meta.js';
 
 const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
 const numeric = value => {
@@ -7,34 +8,46 @@ const numeric = value => {
   return /^\d+(?:\.\d+)?$/.test(text) ? Number(text) : null;
 };
 
-/** Explicit player selectors always include both the name and four-digit tag. */
-export function normalizeGameIdSelector(value = '') {
-  const query = clean(value).normalize('NFC');
-  if (!query) return '';
-  const match = /^([^#]+?)\s*#\s*(\d{4})$/.exec(query);
-  if (!match || !match[1].trim() || query.length > 160) {
-    throw new PiuError('GAME_ID_FORMAT', '请使用完整的 名称#四位标签，例如 ZANTING#9403；不再接受纯名称、纯标签或 uid。');
+/** Official profile names are ASCII letters/digits, 1–12 characters, and case-insensitive. */
+export function normalizeGameIdName(value) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9]{1,12}$/.test(value.trim())) {
+    throw new PiuError('GAME_ID_FORMAT', '档案名称须为 1–12 位 ASCII 字母或数字，不允许内部空格或其他字符。');
   }
-  return `${match[1].trim()}#${match[2]}`;
+  return value.trim().toUpperCase();
+}
+
+/** Canonical full identity; whitespace around the display separator is harmless. */
+export function normalizeGameIdSelector(value = '') {
+  const query = String(value ?? '').trim();
+  if (!query) return '';
+  const match = /^([^#]+?)\s*#\s*([0-9]{4})$/.exec(query);
+  if (!match || query.length > 160) {
+    throw new PiuError('GAME_ID_FORMAT', '完整档案标识须为 1–12 位字母数字名称#四位标签，例如 ZANTING#9403。');
+  }
+  return `${normalizeGameIdName(match[1])}#${match[2]}`;
 }
 
 /** Existing account profiles. This deliberately ignores the separate Game ID rename form. */
 export function parseGameIds(html) {
   const $ = load(html);
-  const currentName = clean($('.subProfile_wrap .name_w .t2').first().text()).replace(/\s*#\s*/, '#').toUpperCase();
+  let currentName = '';
+  try { currentName = normalizeGameIdSelector($('.subProfile_wrap .name_w .t2').first().text()); }
+  catch { /* Invalid display text must not select a different profile. */ }
   const gameIds = [];
   const seen = new Set();
   $('#profile_modal input[name="sub_profile"]').each((_, element) => {
     const input = $(element);
     const id = input.attr('value') ?? '';
     const root = input.closest('.in_profile');
-    const rawName = clean(root.find('.name_w .t2').first().text()).normalize('NFC');
-    const match = /^([^#]+?)\s*#\s*(\d{4})$/.exec(rawName);
-    if (!/^\d{1,16}$/.test(id) || !match || seen.has(id)) return;
-    const playerName = `${match[1].trim()}#${match[2]}`;
+    if (!/^[0-9]{1,16}$/.test(id) || seen.has(id)) return;
+    let playerName;
+    try { playerName = normalizeGameIdSelector(root.find('.name_w .t2').first().text()); }
+    catch { return; }
+    if (!playerName) return;
+    const [gameId, tag] = playerName.split('#');
     seen.add(id);
-    gameIds.push({id, uid: `uid${gameIds.length + 1}`, playerName, gameId: match[1].trim(), tag: `#${match[2]}`,
-      selected: input.is('[checked]') || playerName.replace(/\s*#\s*/, '#').toUpperCase() === currentName});
+    gameIds.push({id, uid: `uid${gameIds.length + 1}`, playerName, gameId, tag: `#${tag}`,
+      selected: input.is('[checked]') || playerName === currentName});
   });
   return gameIds;
 }
@@ -43,9 +56,8 @@ export function resolveGameId(gameIds, selector = '') {
   const query = normalizeGameIdSelector(selector);
   if (!query) return gameIds[0] ?? null;
   const fullName = item => normalizeGameIdSelector(item.playerName || `${item.gameId}${item.tag}`);
-  const exact = gameIds.filter(item => fullName(item) === query);
-  const matches = exact.length ? exact : gameIds.filter(item => fullName(item).toUpperCase() === query.toUpperCase());
-  if (matches.length > 1) throw new PiuError('GAME_ID_AMBIGUOUS', `完整 GAME ID 大小写仍有歧义，请使用列表中准确的名称：${matches.map(item => fullName(item)).join('、')}`);
+  const matches = gameIds.filter(item => fullName(item) === query);
+  if (matches.length > 1) throw new PiuError('GAME_ID_AMBIGUOUS', '官网完整 GAME ID 对应多个档案，已停止读取；请刷新档案列表或重新登录。');
   if (!matches.length) throw new PiuError('GAME_ID_NOT_FOUND', '你的账号中未找到该完整档案，请私聊发送 #piu list 查看 名称#标签。');
   return matches[0];
 }
@@ -118,7 +130,7 @@ export function parseRecent(html, {baseUrl = 'https://www.piugame.com'} = {}) {
       plate: assetCode(row.find('.con2 img[src*="/plate/"]').first().attr('src'), 'plate'),
       jacket: imageUrl(row, baseUrl), playedAt: recentPlayedAt(playedAtSource), playedAtSource, judgements});
   });
-  return {kind: 'recent', playerName, pumbility: null, ranking: null,
+  return {kind: 'recent', playerName, ...parseProfileMeta($), pumbility: null, ranking: null,
     updatedAt: new Date().toISOString(), source: 'piugame.com', records};
 }
 function chart(root) {
@@ -180,8 +192,9 @@ export function parsePumbility(html, {baseUrl = 'https://www.piugame.com', offse
     throw new PiuError('PAGE_CHANGED', 'Pumbility 数据不完整，可能是官网改版；请联系管理员更新解析器。');
   }
   const profile = $('.subProfile_wrap').first();
-  const rawPlayerName = clean(profile.find('.name_w .t2').first().text()) || clean(profile.find('.profile_name .t2').first().text()) || 'PIU Player';
-  const playerName = /#\s*\d{4}$/.test(rawPlayerName) ? normalizeGameIdSelector(rawPlayerName) : rawPlayerName;
+  const rawPlayerName = profile.find('.name_w .t2').first().text().trim() || profile.find('.profile_name .t2').first().text().trim();
+  // Legacy/offline breakdowns may omit the header; absence is not an invented identity.
+  const playerName = rawPlayerName ? normalizeGameIdSelector(rawPlayerName) : null;
   let lastPage = 1;
   $('.board_paging a, .board_paging button').each((_, el) => {
     const node = $(el);
@@ -189,6 +202,6 @@ export function parsePumbility(html, {baseUrl = 'https://www.piugame.com', offse
     const n = match ? Number(match[1]) : numeric(node.text());
     if (n && n <= 20) lastPage = Math.max(lastPage, n);
   });
-  return {playerName, pumbility, ranking: null, updatedAt: new Date().toISOString(),
+  return {playerName, ...parseProfileMeta($), pumbility, ranking: null, updatedAt: new Date().toISOString(),
     source: 'piugame.com', records, lastPage};
 }

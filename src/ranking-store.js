@@ -4,6 +4,7 @@ import path from 'node:path';
 import {isDeepStrictEqual} from 'node:util';
 import {PiuError} from './errors.js';
 import {parseDate, shanghaiDate, zoned01} from './ranking-time.js';
+import {normalizeGameIdName, normalizeGameIdSelector} from './parser.js';
 
 function invalid(message) { return new PiuError('RANK_SNAPSHOT', message); }
 
@@ -35,12 +36,26 @@ function json(value, name) {
 
 function identity(entry) {
   if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw invalid('排行榜档案无效。');
-  const playerKey = text(entry.playerKey, 'playerKey', {max: 1024});
-  const gameId = text(entry.gameId, 'GAME ID', {max: 256});
+  text(entry.playerKey, 'playerKey', {max: 1024});
+  let gameId;
+  try { gameId = normalizeGameIdName(entry.gameId); }
+  catch { throw invalid('排行榜 GAME ID 名称必须为 1 至 12 位英文字母或数字。'); }
   const tag = text(entry.tag, 'tag', {max: 5});
   if (!/^#\d{4}$/.test(tag)) throw invalid('排行榜 GAME ID 标签必须为 # 加四位数字。');
+  const playerKey = `game:${gameId}${tag}`;
   const sourceId = entry.sourceId == null ? null : text(String(entry.sourceId), 'sourceId', {max: 1024});
   return {...entry, playerKey, gameId, tag, ...(sourceId == null ? {} : {sourceId})};
+}
+
+function followKey(value) {
+  const key = text(value, 'playerKey', {max: 1024});
+  const named = /^(?:game|name):(.+)$/.exec(key);
+  if (!named) return key; // Legacy source IDs are opaque, not GAME ID names.
+  try {
+    const full = normalizeGameIdSelector(named[1]);
+    if (!full) throw new Error();
+    return `game:${full}`;
+  } catch { throw invalid('取消关注的完整档案标识无效。'); }
 }
 
 function normalizeSnapshot(input, minEntries) {
@@ -165,7 +180,7 @@ export class RankingStore {
   #snapshot(row) {
     if (!row) return null;
     return {...metadata(row), entries: this.db.prepare('SELECT entry_json FROM ranking_entries WHERE snapshot_id = ? ORDER BY row_ordinal')
-      .all(row.id).map(entry => JSON.parse(entry.entry_json))};
+      .all(row.id).map(entry => identity(JSON.parse(entry.entry_json)))};
   }
 
   getSnapshot(date) {
@@ -197,9 +212,19 @@ export class RankingStore {
     });
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      const insert = this.db.prepare(`INSERT INTO ranking_follows (owner,player_key,entry_json) VALUES (?,?,?)
-        ON CONFLICT(owner,player_key) DO UPDATE SET entry_json = excluded.entry_json`);
-      for (const row of rows) insert.run(owner, row.playerKey, row.payload);
+      const insert = this.db.prepare('INSERT INTO ranking_follows (owner,player_key,entry_json) VALUES (?,?,?)');
+      const update = this.db.prepare('UPDATE ranking_follows SET player_key = ?, entry_json = ? WHERE seq = ?');
+      const remove = this.db.prepare('DELETE FROM ranking_follows WHERE seq = ?');
+      for (const row of rows) {
+        const existing = this.db.prepare('SELECT seq,entry_json FROM ranking_follows WHERE owner = ? ORDER BY seq').all(owner)
+          .filter(saved => identity(JSON.parse(saved.entry_json)).playerKey === row.playerKey);
+        if (!existing.length) insert.run(owner, row.playerKey, row.payload);
+        else {
+          // Normalize old name/source keys without losing follow insertion order.
+          for (const duplicate of existing.slice(1)) remove.run(duplicate.seq);
+          update.run(row.playerKey, row.payload, existing[0].seq);
+        }
+      }
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     return this.getFollows(owner);
@@ -208,11 +233,14 @@ export class RankingStore {
   unfollow(owner, playerKeys) {
     owner = text(owner, 'owner', {max: 256});
     if (!Array.isArray(playerKeys)) throw invalid('取消关注档案必须为数组。');
-    const keys = playerKeys.map(key => text(key, 'playerKey', {max: 1024}));
+    const keys = new Set(playerKeys.map(followKey));
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      const remove = this.db.prepare('DELETE FROM ranking_follows WHERE owner = ? AND player_key = ?');
-      for (const key of keys) remove.run(owner, key);
+      const remove = this.db.prepare('DELETE FROM ranking_follows WHERE seq = ?');
+      const existing = this.db.prepare('SELECT seq,player_key,entry_json FROM ranking_follows WHERE owner = ?').all(owner);
+      for (const row of existing) {
+        if (keys.has(row.player_key) || keys.has(identity(JSON.parse(row.entry_json)).playerKey)) remove.run(row.seq);
+      }
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     return this.getFollows(owner);
@@ -220,7 +248,12 @@ export class RankingStore {
 
   getFollows(owner) {
     owner = text(owner, 'owner', {max: 256});
-    return this.db.prepare('SELECT entry_json FROM ranking_follows WHERE owner = ? ORDER BY seq').all(owner).map(row => JSON.parse(row.entry_json));
+    const canonical = new Map();
+    for (const row of this.db.prepare('SELECT entry_json FROM ranking_follows WHERE owner = ? ORDER BY seq').all(owner)) {
+      const entry = identity(JSON.parse(row.entry_json));
+      if (!canonical.has(entry.playerKey)) canonical.set(entry.playerKey, entry);
+    }
+    return [...canonical.values()];
   }
 
   close() { this.db.close(); }

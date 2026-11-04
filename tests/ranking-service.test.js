@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createRankingService} from '../src/ranking-service.js';
 import {RankingStore} from '../src/ranking-store.js';
-import {parseFollowBatch, resolveFollowBatch, buildRankComparison} from '../src/ranking-follow.js';
+import {parseFollowBatch, parseFullPlayer, canonicalPlayer, resolveFollowBatch, buildRankComparison} from '../src/ranking-follow.js';
 import {zoned01} from '../src/ranking-time.js';
 import {PiuError} from '../src/errors.js';
 
@@ -37,7 +37,8 @@ test('explicit follow identities reject pure tags/names/uid and preserve duplica
  for(const text of ['#1111','ALPHA','uid1'])assert.throws(()=>parseFollowBatch(text),{code:'RANK_ID'});
  const selectors=parseFollowBatch('ALPHA#1111 BETA#1111');
  assert.equal(resolveFollowBatch(entries,selectors).length,2);
- assert.deepEqual(parseFollowBatch('"NAME WITH SPACE#1234" ALPHA #1111'),[{gameId:'NAME WITH SPACE',tag:'#1234'},{gameId:'ALPHA',tag:'#1111'}]);
+ assert.deepEqual(parseFollowBatch('alpha#1111 beta #1111'),[{gameId:'ALPHA',tag:'#1111'},{gameId:'BETA',tag:'#1111'}]);
+ assert.throws(()=>parseFollowBatch('"NAME WITH SPACE#1234"'),{code:'RANK_ID'});
  assert.throws(()=>parseFollowBatch('"ALPHA#1111'),{code:'RANK_ID'});
 });
 test('batch follow/unfollow is atomic, idempotent for known follows, and owner isolated',async t=>{
@@ -150,4 +151,15 @@ test('ranking Cookie import requires an encryption key before accessing the webs
  t.after(()=>service.close());
  await assert.rejects(service.importCookies('sid=test-only'),error=>error.code==='RANK_AUTH'&&error.message.includes('PIU_SESSION_KEY'));
  assert.equal(called,false);
+});
+
+test('follow names share strict ASCII naming and case-insensitive complete identity matching',()=>{
+ assert.deepEqual(parseFullPlayer('aBc123#0101'),{gameId:'ABC123',tag:'#0101'});
+ assert.equal(canonicalPlayer({gameId:'alpha',tag:'#1111'}),'ALPHA#1111');
+ assert.equal(resolveFollowBatch(entries,parseFollowBatch('alpha#1111 ALPHA#1111')).length,1);
+ for(const input of ['NAME WITH SPACE#1111','A_B#1111','A-B#1111','名字#1111','A'.repeat(13)+'#1111','é#1111']){
+  assert.throws(()=>parseFullPlayer(input),{code:'RANK_ID'});
+ }
+ const duplicate=[entries[0],{...entries[0],gameId:'alpha',playerKey:'game:alpha#1111'}];
+ assert.throws(()=>resolveFollowBatch(duplicate,parseFollowBatch('ALPHA#1111')),{code:'RANK_ID'});
 });

@@ -1,8 +1,7 @@
 import { createCanvas } from '@napi-rs/canvas';
+import {normalizeGameIdName,normalizeGameIdSelector} from './parser.js';
 import {encodeOutput,scaledDimension} from './image-output.js';
 
-const RANK_LAYOUT_WIDTH = 1800;
-export const RANK_IMAGE_WIDTH = scaledDimension(RANK_LAYOUT_WIDTH);
 const FONT = 'Arial, "Noto Sans CJK SC", "Noto Sans", "Microsoft YaHei", "PingFang SC", sans-serif';
 const INK = '#172333';
 const MUTED = '#627185';
@@ -14,7 +13,7 @@ const MARGIN = 32;
 const TABLE_TOP = 226;
 const HEADER_HEIGHT = 60;
 const COLUMNS = [
-  { key: 'name', title: 'GAME ID（名称#标签）', width: 468 },
+  { key: 'name', title: 'GAME ID', width: 340 },
   { key: 'score', title: 'PUMBILITY', width: 220 },
   { key: 'scoreDelta', title: '分数变动', width: 150 },
   { key: 'worldRank', title: '世界名次', width: 136 },
@@ -24,6 +23,8 @@ const COLUMNS = [
   { key: 'lastPlayedAt', title: '最后游玩时间（GMT+8）', width: 396 },
 ];
 const TABLE_WIDTH = COLUMNS.reduce((sum, column) => sum + column.width, 0);
+const RANK_LAYOUT_WIDTH = TABLE_WIDTH + MARGIN * 2;
+export const RANK_IMAGE_WIDTH = scaledDimension(RANK_LAYOUT_WIDTH);
 const isNumber = value => typeof value === 'number' && Number.isFinite(value);
 
 /** The board exposes no nationality; use the followed-list scope by default. */
@@ -84,13 +85,15 @@ function entryState(row) {
 export function formatRankRow(row, hasPreviousSnapshot = true, rankBasis = 'followed') {
   const current = row.current ?? null;
   const previous = row.previous ?? null;
-  const rawName = String(row.gameId ?? row.playerName ?? row.playerKey ?? '未知玩家');
+  const rawName = String(row.gameId ?? row.playerName ?? row.playerKey ?? '').replace(/^game:/, '');
   const tag = row.tag ? String(row.tag).replace(/^#?/, '#') : DASH;
-  const name = tag !== DASH && rawName.endsWith(tag) ? rawName.slice(0, -tag.length).trimEnd() : rawName;
+  const rawIdentifier = tag === DASH ? rawName : rawName.endsWith(tag) ? rawName : `${rawName}${tag}`;
+  const identifier = rawIdentifier.includes('#') ? normalizeGameIdSelector(rawIdentifier) : normalizeGameIdName(rawIdentifier);
+  const [name, canonicalTag] = identifier.split('#');
   const currentRank = scopedRank(current, rankBasis);
   const previousRank = scopedRank(previous, rankBasis);
   const result = {
-    name, tag, identifier: tag === DASH ? name : `${name}${tag}`,
+    name, tag:canonicalTag ? `#${canonicalTag}` : DASH, identifier,
     score: current && isNumber(current.score) ? current.score.toFixed(2) : DASH,
     worldRank: current && isNumber(current.worldRank) ? String(current.worldRank) : '未上榜',
     countryRank: isNumber(currentRank) ? String(currentRank) : DASH,
@@ -205,7 +208,7 @@ export async function renderRankComparison({ title, current, previous = null, ro
   ctx.fillStyle = '#f2f5f8'; ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = '#ffffff'; ctx.fillRect(MARGIN, 24, TABLE_WIDTH, 180);
   ctx.fillStyle = '#163b66'; ctx.fillRect(MARGIN, 24, 7, 180);
-  text(ctx, title || 'PIU PHOENIX 2 · PUMBILITY 关注榜', MARGIN + 26, 61, 1280, 34, INK, 700, 'left');
+  text(ctx, title || 'PIU PHOENIX 2 · PUMBILITY 关注榜', MARGIN + 26, 61, TABLE_WIDTH - 400, 34, INK, 700, 'left');
   text(ctx, scopeLabel || '全球前 1000', RANK_LAYOUT_WIDTH - MARGIN - 22, 60, 350, 23, MUTED, 600, 'right');
   text(ctx, `本次：${sourceLabel(current)}    对比：${sourceLabel(previous)}`, MARGIN + 26, 105, TABLE_WIDTH - 52, 24, INK, 400, 'left');
   text(ctx, `实际采集：${formatRankCaptureTime(current.capturedAt)}（GMT+8）${previous ? `   /   前次：${formatRankCaptureTime(previous.capturedAt)}` : ''}`, MARGIN + 26, 143, TABLE_WIDTH - 52, 22, MUTED, 400, 'left');
