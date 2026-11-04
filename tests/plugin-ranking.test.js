@@ -20,6 +20,7 @@ function harness() {
   };
   const best50 = {
     async login(...args) {calls.push(['login', ...args]); return {url: 'https://bot.example/login/token', expiresAt: Date.now() + 300_000};},
+    async importCookies(...args) {calls.push(['importCookies', ...args]);},
     async best50(...args) {calls.push(['best50', ...args]); return Buffer.from('PNG');},
     async recent(...args) {calls.push(['recent', ...args]); return Buffer.from('RECENT PNG');},
     async data(...args) {calls.push(['data', ...args]); return Buffer.from('DATA PNG');},
@@ -29,7 +30,7 @@ function harness() {
   const Plugin = vm.runInNewContext(`${source}\nPiuBest50;`, {
     plugin: class {
       constructor(options) {Object.assign(this, options); this.sent = [];}
-      async reply(value) {this.sent.push(value); return value;}
+      async reply(value, quote) {this.sent.push(value); calls.push(['reply', quote]); return value;}
       addCleanup(fn) {this.cleanup = fn;}
     },
     createService: async () => {calls.push(['createService']);return best50;}, createRankingService: async () => ranking,
@@ -51,6 +52,41 @@ test('plugin starts daily ranking scheduler and closes both services through cle
   assert.equal(calls.filter(row => row[0] === 'start').length, 1);
   assert.equal(calls.filter(row => row[0] === 'rankClose').length, 1);
   assert.equal(calls.filter(row => row[0] === 'bestClose').length, 1);
+});
+
+test('cookie help and group refusal do not create a service or quote credentials', async () => {
+  const {app, calls} = harness();
+  app.e.msg = '#piu cookie';
+  await app.importCookies();
+  assert.match(app.sent.at(-1), /Network/);
+  assert.equal(calls.some(row => row[0] === 'createService'), false);
+  for (const group of [{isGroup:true}, {group_id:123}]) {
+    Object.assign(app.e, {isGroup:false, group_id:undefined}, group);
+    app.e.msg = '#piu cookie PHPSESSID=private-test-value';
+    await app.importCookies();
+    assert.match(app.sent.at(-1), /仅限私聊/);
+  }
+  assert.equal(calls.some(row => row[0] === 'createService'), false);
+  assert.equal(app.sent.some(value => value.includes('private-test-value')), false);
+  assert.ok(calls.filter(row => row[0] === 'reply').every(row => row[1] === false));
+});
+
+test('cookie command forwards text unchanged for the requesting owner without echoing it', async () => {
+  const {app, calls} = harness();
+  const rule = new RegExp(app.rule.find(rule => rule.fnc === 'importCookies').reg);
+  assert.ok(rule.test('#piu cookie'));
+  assert.ok(rule.test('#piu COOKIE PHPSESSID=test-token'));
+  assert.ok(rule.test('#piu cookie [\n{"name":"PHPSESSID"}\n]'));
+  assert.equal(rule.test('#piu cookies PHPSESSID=test-token'), false);
+  for (const input of ['PHPSESSID=private-test-value; pref=en', '[\n{"name":"PHPSESSID","value":"private-test-value","domain":"www.piugame.com"}\n]']) {
+    app.e.msg = `#piu cookie ${input}`;
+    await app.importCookies();
+    assert.equal(calls.filter(row => row[0] === 'importCookies').at(-1)[1], '["default","456","123"]');
+    assert.equal(calls.filter(row => row[0] === 'importCookies').at(-1)[2], input);
+    assert.match(app.sent.at(-1), /验证成功/);
+    assert.equal(app.sent.at(-1).includes('private-test-value'), false);
+  }
+  assert.ok(calls.filter(row => row[0] === 'reply').every(row => row[1] === false));
 });
 
 test('rank commands pass the current owner and exact date order while rejecting incomplete dates', async () => {
@@ -136,7 +172,7 @@ test('help covers every bot command, permissions, schedule and mandatory full id
   assert.equal(app.sent.at(-1).file.toString(),'HELP PNG');
   assert.equal(calls.some(row=>row[0]==='createService'),false,'help must work without login configuration');
   const help=[...HELP_NOTES,...HELP_GROUPS.flatMap(group=>group.items.map(item=>[item.command,item.description,item.aliases].filter(Boolean).join(' ')))].join('\n');
-  for (const command of ['#piu help', '#piu 帮助', '#piu 登录', '#piu list', '#piu b50', '#piu recent', '#piu data', '#piu follow', '#piu unfollow', '#piu rank', '#piu 解绑', '#piu ranklogin']) {
+  for (const command of ['#piu help', '#piu 帮助', '#piu 登录', '#piu cookie', '#piu list', '#piu b50', '#piu recent', '#piu data', '#piu follow', '#piu unfollow', '#piu rank', '#piu 解绑', '#piu ranklogin']) {
     assert.ok(help.includes(command), `help must explain ${command}`);
   }
   for (const alias of ['登陆', '绑定', 'login', '账号', '游戏ID', 'ids', 'best50', '退出', 'logout']) assert.ok(help.includes(alias));

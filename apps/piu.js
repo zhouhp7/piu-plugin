@@ -30,6 +30,7 @@ export class PiuBest50 extends plugin {
     super({name: 'PIU Best50', dsc: 'PIU Pumbility 成绩图', event: 'message', priority: 5000,
       rule: [{reg: '^#?(?:piu|PIU)\\s*(?:帮助|help)$', fnc: 'help'},
         {reg: '^#?(?:piu|PIU)\\s*(?:登录|登陆|绑定|login)$', fnc: 'login'},
+        {reg: '^#?(?:piu|PIU)\\s*(?:cookie|COOKIE)(?:\\s+[\\s\\S]*)?$', fnc: 'importCookies'},
         {reg: '^#?(?:piu|PIU)\\s*(?:b50|B50|best50|Best50)(?:\\s+[^@\\r\\n]{1,160})?\\s*$', fnc: 'best50'},
         {reg: '^#?(?:piu|PIU)\\s*(?:recent|RECENT)(?:\\s+[^@\\r\\n]{1,160})?\\s*$', fnc: 'recent'},
         {reg: '^#?(?:piu|PIU)\\s*(?:data|DATA)(?:\\s+[^@\\r\\n]{1,160})?\\s*$', fnc: 'playData'},
@@ -65,6 +66,16 @@ export class PiuBest50 extends plugin {
       await this.reply(`请用手机扫码或打开下方链接，在独立窗口内完成 PIU 官网登录，再点击“完成并绑定”。有效期约 ${minutes} 分钟。\n服务器将保存登录会话用于读取成绩；账号密码不会保存。二维码请勿转发。`);
       return this.reply([image(png), ticket.url]);
     } catch (error) { return this.reply(publicError(error)); }
+  }
+  async importCookies() {
+    // Never quote the source message: it may contain a live login credential.
+    if (this.e.isGroup || this.e.group_id) return this.reply('Cookie 仅限私聊导入，请勿在群聊发送登录凭证。', false);
+    const input = message(this.e).replace(/^#?piu\s*cookie\b/i, '').trim();
+    if (!input) return this.reply('先在自己的浏览器登录 https://www.piugame.com，并打开个人 Pumbility 页面。\n在开发者工具 Application → Cookies 中找到 sid，复制其 Value，然后私聊发送：\n#piu cookie sid=复制的值\n也可在 Network 中刷新，选择 pumbility.php 请求，复制 Request Headers 的完整 Cookie 值，在 #piu cookie 后粘贴。支持 PIU Cookie JSON 文本。无需密码或 AM.PASS Cookie。Cookie 相当于登录凭证，请只发送给可信机器人。', false);
+    try {
+      await (await service()).importCookies(identity(this.e), input);
+      return this.reply('Cookie 登录验证成功，已加密保存并绑定。可以发送 #piu list 或 #piu b50；#piu 解绑 可删除机器人保存的会话。', false);
+    } catch (error) { return this.reply(publicError(error), false); }
   }
   async best50() {
     const selector = String(this.e.msg ?? this.e.raw_message ?? '').replace(/^#?piu\s*(?:b50|best50)/i, '').trim();

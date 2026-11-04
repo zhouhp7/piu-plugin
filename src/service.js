@@ -8,6 +8,7 @@ import { PiuError } from './errors.js';
 import { normalizeGameIdSelector } from './parser.js';
 import { enrichProfileRanking } from './profile-ranking.js';
 import { renderPlayData } from './play-data.js';
+import { parseCookieState } from './cookies.js';
 
 export async function createService(config, dependencies = {}) {
   const vault = dependencies.vault ?? new Vault({directory: path.join(config.dataDir, 'sessions'), key: config.key});
@@ -15,6 +16,7 @@ export async function createService(config, dependencies = {}) {
   const getProfile = dependencies.fetchProfile ?? fetchProfile;
   const getRecent = dependencies.fetchRecent ?? fetchRecent;
   const getGameIds = dependencies.fetchGameIds ?? fetchGameIds;
+  const validateLogin = dependencies.readProfile ?? readProfile;
   const render = dependencies.renderBest50 ?? renderBest50;
   const renderRecentImage = dependencies.renderRecent ?? renderRecent;
   const imageTypes = {
@@ -27,6 +29,7 @@ export async function createService(config, dependencies = {}) {
   const summaries = new Map();
   const pending = new Map();
   const mutations = new Map();
+  const imports = new Map();
   const loginCallbacks = new Map();
   const imageTtl = Math.max(config.cacheMs, 10000);
   const summaryTtl = 120000;
@@ -106,7 +109,7 @@ export async function createService(config, dependencies = {}) {
   const bridge = await (dependencies.createBridge ?? createBridge)({host: config.host, port: config.port, publicUrl: config.publicUrl,
     ttlMs: config.ttlMs, maxSessions: config.maxSessions,
     createLogin: () => browser.createLogin(),
-    validateLogin: page => readProfile(page, {paginate: false}),
+    validateLogin: page => validateLogin(page, {paginate: false}),
     saveSession: async (userKey, state) => {
       beginMutation(userKey);
       try {
@@ -135,14 +138,56 @@ export async function createService(config, dependencies = {}) {
     async login(userKey, {onBoundSession} = {}) {
       if (pending.has(userKey) || mutations.has(userKey)) throw new PiuError('BUSY', '账号正在操作，请完成后再登录。');
       if (onBoundSession !== undefined && typeof onBoundSession !== 'function') throw new TypeError('onBoundSession must be a function');
-      const ticket = await bridge.createTicket(userKey);
-      // createTicket waits for any prior ticket's save; replace authorization only afterwards.
-      loginCallbacks.delete(userKey);
-      if (onBoundSession) {
-        if (!Number.isFinite(ticket.expiresAt)) throw new Error('Login ticket expiry is required');
-        loginCallbacks.set(userKey, {callback: onBoundSession, expiresAt: ticket.expiresAt});
+      beginMutation(userKey);
+      try {
+        const ticket = await bridge.createTicket(userKey);
+        // createTicket waits for any prior ticket's save; replace authorization only afterwards.
+        loginCallbacks.delete(userKey);
+        if (onBoundSession) {
+          if (!Number.isFinite(ticket.expiresAt)) throw new Error('Login ticket expiry is required');
+          loginCallbacks.set(userKey, {callback: onBoundSession, expiresAt: ticket.expiresAt});
+        }
+        return ticket;
+      } finally { endMutation(userKey); }
+    },
+    async importCookies(userKey, input) {
+      if (pending.has(userKey) || mutations.has(userKey)) throw new PiuError('BUSY', '账号正在操作，请完成后再导入 Cookie。');
+      const state = parseCookieState(input);
+      if (fetching >= config.maxFetches) throw new PiuError('BUSY', '当前查询人数较多，请稍后再试。');
+      beginMutation(userKey);
+      fetching++;
+      const task = (async () => {
+        let context;
+        try {
+          // Revoke the old remote login before validation. An ordinary Cookie import
+          // must never consume an earlier administrator ranking authorization.
+          loginCallbacks.delete(userKey);
+          await bridge.revoke(userKey);
+          context = await browser.context(state);
+          const profile = await validateLogin(await context.newPage(), {paginate: false});
+          if (!profile) throw new PiuError('AUTH_REQUIRED', 'Cookie 未能通过登录验证，请在自己设备重新登录 PIU 官网后再次导出。');
+          const verified = piuOnlyState(await context.storageState());
+          await vault.save(userKey, {state: verified, savedAt: Date.now()});
+          clearUser(userKey);
+          return profile;
+        } catch (error) {
+          if (error instanceof PiuError) {
+            if (error.code === 'AUTH_REQUIRED') throw new PiuError('AUTH_REQUIRED', 'Cookie 未能通过登录验证，请在自己设备重新登录 PIU 官网后再次导出。');
+            throw error;
+          }
+          // Browser errors can contain serialized Cookie values; do not propagate them.
+          throw new PiuError('COOKIE_IMPORT_FAILED', 'Cookie 导入未完成，请检查官网连接并重新导出 Cookie 后重试。');
+        } finally {
+          await context?.close().catch(() => {});
+        }
+      })();
+      imports.set(userKey, task);
+      try { return await task; }
+      finally {
+        imports.delete(userKey);
+        fetching--;
+        endMutation(userKey);
       }
-      return ticket;
     },
     async best50(userKey, gameId = '') {
       return scoreImage(userKey, gameId, 'b50');
@@ -182,6 +227,9 @@ export async function createService(config, dependencies = {}) {
       try {
         loginCallbacks.delete(userKey);
         await bridge.revoke(userKey);
+        // A ticket reservation already in flight may install its callback while revoke waits.
+        loginCallbacks.delete(userKey);
+        await imports.get(userKey)?.catch(() => {});
         await pending.get(userKey)?.task.catch(() => {});
         clearUser(userKey);
         await vault.delete(userKey);
@@ -191,6 +239,7 @@ export async function createService(config, dependencies = {}) {
       clearInterval(prune);
       loginCallbacks.clear();
       await bridge.close();
+      await Promise.allSettled([...imports.values()]);
       await Promise.allSettled([...pending.values()].map(entry => entry.task));
       cache.clear();
       summaries.clear();

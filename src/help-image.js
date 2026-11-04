@@ -4,6 +4,7 @@ import {UI_COLORS as C,panel,text,wrapLines} from './ui.js';
 export const HELP_GROUPS = Object.freeze([
   {title:'账号与成绩',items:[
     {command:'#piu 登录',description:'私聊扫码，在独立窗口完成官网登录并绑定。',aliases:'登陆 / 绑定 / login'},
+    {command:'#piu cookie [Cookie 内容]',description:'在自己设备登录官网后，私聊导入 Cookie；不带参数查看获取方法。'},
     {command:'#piu list',description:'私聊列出本人账号绑定的全部档案。',aliases:'账号 / 游戏ID / ids'},
     {command:'#piu b50 [名称#标签]',description:'生成 Pumbility Best50；省略档案时使用首个。',aliases:'best50'},
     {command:'#piu recent [名称#标签]',description:'最近最多 50 次游玩，保留重复，显示游戏分数和时间。'},
@@ -26,6 +27,7 @@ export const HELP_NOTES = Object.freeze([
   '日期示例：#piu rank 20261103 20261102。缺失的历史快照不能比较，也不会补造。',
   '机器人在线且排行榜专用会话有效时，每天 GMT+8 01:00 保存全球前 1000 名；按配置保活，失效后由主人重新登录。普通个人登录不会授权全局排行榜采集。',
   '登录、list 仅限私聊；ranklogin 还要求主人权限。二维码是插件登录入口，非官网原生扫码授权；使用账号密码登录，会话加密保存，不保存密码，二维码请勿转发。',
+  'cookie 仅限私聊，支持 Cookie 请求头值或 PIU Cookie JSON 文本；验证成功后加密保存。Cookie 相当于登录凭证，只发送给可信机器人，不要发到群聊。',
 ]);
 
 export const HELP_IMAGE_WIDTH=1200;
