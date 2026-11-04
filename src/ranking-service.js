@@ -8,6 +8,7 @@ import {buildRankComparison, canonicalPlayer, parseFollowBatch, resolveFollowBat
 import {renderRankComparison} from './rank-render.js';
 import {getJacketCache} from './jacket-cache.js';
 import {prefetchJackets} from './jacket-prefetch.js';
+import {parseCookieState} from './cookies.js';
 
 export function createRankingService(config, dependencies = {}) {
   const store = dependencies.store ?? new RankingStore({filename: path.join(config.dataDir, 'rankings.sqlite')});
@@ -118,21 +119,37 @@ export function createRankingService(config, dependencies = {}) {
         maxImages: config.jacketPrefetchImages ?? 120});
     });
   }
+  async function setSession(state) {
+    open();
+    if (!vault) throw new PiuError('RANK_AUTH', '请先配置有效的 PIU_SESSION_KEY。');
+    const metadata = await serial(async () => {
+      const filtered = rankingSessionState(state);
+      if (!filtered.cookies.length) throw new PiuError('RANK_AUTH', '未取得官方登录会话，请重新登录。');
+      const result = await reader.fetch(filtered);
+      const saved = {state: rankingSessionState(result.state), savedAt: now().toISOString()};
+      await vault.save('leaderboard-reader', saved);
+      return saveReadResult(result, saved, 'manual', shanghaiDate(result.capturedAt ?? now()));
+    });
+    if (config.jacketPrefetchPages > 0) void prewarm({onlyIfEmpty: true}).catch(report);
+    return metadata;
+  }
   return {
-    capture, runDue, keepAlive, prewarm,
-    async setSession(state) {
+    capture, runDue, keepAlive, prewarm, setSession,
+    async importCookies(input) {
       open();
       if (!vault) throw new PiuError('RANK_AUTH', '请先配置有效的 PIU_SESSION_KEY。');
-      const metadata = await serial(async () => {
-        const filtered = rankingSessionState(state);
-        if (!filtered.cookies.length) throw new PiuError('RANK_AUTH', '未取得官方登录会话，请重新登录。');
-        const result = await reader.fetch(filtered);
-        const saved = {state: rankingSessionState(result.state), savedAt: now().toISOString()};
-        await vault.save('leaderboard-reader', saved);
-        return saveReadResult(result, saved, 'manual', shanghaiDate(result.capturedAt ?? now()));
-      });
-      if (config.jacketPrefetchPages > 0) void prewarm({onlyIfEmpty: true}).catch(report);
-      return metadata;
+      const state = parseCookieState(input);
+      try { return await setSession(state); }
+      catch (error) {
+        if (error instanceof PiuError) {
+          if (['RANK_AUTH', 'AUTH_REQUIRED'].includes(error.code)) {
+            throw new PiuError('RANK_AUTH', 'Cookie 未能通过排行榜登录验证，请在自己设备重新登录 PIU 官网后再次导出，并由主人私聊 #piu ranklogin sid=会话值。');
+          }
+          throw error;
+        }
+        // Browser errors may contain serialized credentials; never expose them.
+        throw new PiuError('RANK_COOKIE_IMPORT_FAILED', '排行榜 Cookie 导入未完成，请检查官网连接和会话加密配置后重试。');
+      }
     },
     start({keepAlive: keepProcessAlive = false} = {}) {
       open();
@@ -165,7 +182,7 @@ export function createRankingService(config, dependencies = {}) {
       const resolved = resolveFollowBatch(latest.entries, selectors);
       const previous = new Set(store.getFollows(owner).map(row => row.playerKey));
       const combined = new Set([...previous, ...resolved.map(row => row.playerKey)]);
-      if (combined.size > 100) throw new PiuError('RANK_FOLLOW_LIMIT', '每个用户最多关注 100 个档案。');
+      if (combined.size > 100) throw new PiuError('RANK_FOLLOW_LIMIT', '每份关注列表最多关注 100 个档案。');
       const references = resolved.map(({playerKey, gameId, tag, sourceId}) => ({playerKey, gameId, tag, ...(sourceId ? {sourceId} : {})}));
       return {added: references.filter(row => !previous.has(row.playerKey)), follows: store.follow(owner, references)};
     },

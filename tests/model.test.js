@@ -5,6 +5,7 @@ import { renderBest50, IMAGE_WIDTH, IMAGE_HEIGHT, CARD_WIDTH, CARD_HEIGHT } from
 import { isOfficialUrl } from '../src/browser.js';
 import { piuOnlyState } from '../src/client.js';
 import { loadConfig } from '../src/config.js';
+import {loadImage} from '@napi-rs/canvas';
 
 test('normalization preserves order, missing data, and 50-record cap without deriving rating', () => {
   const records = Array.from({length:60}, (_,i) => ({title: `Song${i}`, score: 1000000-i, rank:i+1, mode:'single'}));
@@ -20,12 +21,15 @@ test('normalization preserves order, missing data, and 50-record cap without der
   assert.equal(failed.gradeCode, 'X_AA+');
   assert.equal(failed.failed, true);
 });
-test('renderer makes a complete valid PNG and never fetches arbitrary image sources by default', async () => {
+test('renderer makes a scaled JPEG and never fetches arbitrary image sources by default', async () => {
   assert.equal(CARD_WIDTH / CARD_HEIGHT, 600 / 260, 'cards retain the supplied reference proportions');
-  const png = await renderBest50({playerName:'中文测试 / PIU', records:[{title:'A very long title ' .repeat(12), jacket:'https://127.0.0.1/private', rating:300, grade:'S+'}]});
-  assert.equal(png.subarray(1,4).toString(), 'PNG');
-  assert.equal(png.readUInt32BE(16), IMAGE_WIDTH);
-  assert.equal(png.readUInt32BE(20), IMAGE_HEIGHT);
+  const jpeg = await renderBest50({playerName:'中文测试 / PIU', records:[{title:'A very long title ' .repeat(12), jacket:'https://127.0.0.1/private', rating:300, grade:'S+'}]});
+  assert.equal(jpeg.readUInt16BE(0), 0xffd8);
+  const image = await loadImage(jpeg);
+  assert.equal(image.width, IMAGE_WIDTH);
+  assert.equal(image.height, IMAGE_HEIGHT);
+  assert.equal(image.width, 2160);
+  assert.equal(image.height, 2223);
 });
 test('official navigation allowlist rejects credential URLs, foreign hosts, non-HTTPS and nonstandard ports', () => {
   assert.ok(isOfficialUrl('https://api.am-pass.net/sso'));

@@ -3,6 +3,8 @@
  * missing: in particular, this module never calculates a chart rating.
  */
 
+import {normalizeTitleProgress} from './title-progress.js';
+
 const MODES = new Map([
   ['S', 'S'], ['SINGLE', 'S'],
   ['D', 'D'], ['DOUBLE', 'D'],
@@ -53,6 +55,7 @@ export function normalizeProfile(input = {}) {
     avatar: text(input.avatar, null, 2048),
     updatedAt: text(input.updatedAt, null, 120),
     demo: input.demo === true,
+    titleProgress: normalizeTitleProgress(input.titleProgress),
     records: source.slice(0, 50).map((record, index) => {
       const item = record && typeof record === 'object' ? record : {};
       const rank = number(item.rank);

@@ -4,6 +4,7 @@ import {createRankingService} from '../src/ranking-service.js';
 import {RankingStore} from '../src/ranking-store.js';
 import {parseFollowBatch, resolveFollowBatch, buildRankComparison} from '../src/ranking-follow.js';
 import {zoned01} from '../src/ranking-time.js';
+import {PiuError} from '../src/errors.js';
 
 const state = {cookies:[{domain:'.piugame.com',name:'sid',value:'test-only'}],origins:[]};
 const entries = [
@@ -23,7 +24,7 @@ function fixture(t,{time='2026-11-03T00:30:00+08:00',read,login=true}={}) {
  const clock=timers(),warnings=[];
  const service=createRankingService({dataDir:'/unused',rankEnabled:true,rankKeepAliveMs:0,captureRetries:0},{
   store,vault:{async load(key){return saved.get(key)??null;},async save(key,value){saved.set(key,value);}},
-  reader:{async fetch(input){calls++;if(read)await read(input);return{entries,state:input,capturedAt:current.toISOString(),audit:{count:2}};},async close(){}},
+  reader:{async fetch(input){calls++;const extra=read?await read(input):{};return{entries,state:input,capturedAt:current.toISOString(),audit:{count:2},...extra};},async close(){}},
   now:()=>new Date(current),timers:clock,logger:{warn:message=>warnings.push(message)},
   render:async input=>Buffer.from(JSON.stringify(input)),
  });
@@ -92,4 +93,61 @@ test('comparison keeps absent players missing and uses followed-player ranks rat
  const data=buildRankComparison(current,previous,follows);
  assert.equal(data.rankBasis,'followed');assert.equal(data.rows[0].current,null);
  assert.equal(data.rows[1].previous,null);assert.equal(data.rows[1].current.followRank,1);
+});
+
+test('ranking Cookie import validates and saves a dedicated refreshed session and manual snapshot',async t=>{
+ const refreshed={cookies:[{domain:'.piugame.com',name:'sid',value:'refreshed'}],origins:[]};
+ const f=fixture(t,{login:false,read:async input=>{
+  assert.equal(input.cookies.length,1);assert.equal(input.cookies[0].value,'submitted');
+  assert.deepEqual(input.origins,[]);assert.equal(f.saved.has('leaderboard-reader'),false);
+  return{state:refreshed};
+ }});
+ const meta=await f.service.importCookies(JSON.stringify({cookies:[
+  {domain:'.piugame.com',name:'sid',value:'submitted'},
+  {domain:'api.am-pass.net',name:'sso',value:'excluded'},
+ ],origins:[{origin:'https://www.piugame.com',localStorage:[{name:'ignored',value:'x'}]}]}));
+ assert.equal(meta.count,2);assert.equal(meta.kind,'manual');assert.equal(f.calls(),1);
+ assert.equal(f.saved.get('leaderboard-reader').state.cookies[0].value,'refreshed');
+});
+
+test('rejected ranking Cookie imports preserve the previous binding and snapshot and redact errors',async t=>{
+ for(const error of [new PiuError('RANK_AUTH','expired'),new PiuError('RANK_INCOMPLETE','incomplete'),new Error('sid=secret-never-echo')]){
+  let fail=false;
+  const f=fixture(t,{read:async()=>{if(fail)throw error;}});
+  await f.service.capture();
+  const before=structuredClone(f.saved.get('leaderboard-reader')),snapshot=f.store.getSnapshot('20261103');fail=true;
+  await assert.rejects(f.service.importCookies('sid=secret-never-echo'),failure=>{
+   assert.ok(!failure.message.includes('secret-never-echo'));
+   return ['RANK_AUTH','RANK_INCOMPLETE','RANK_COOKIE_IMPORT_FAILED'].includes(failure.code);
+  });
+  assert.deepEqual(f.saved.get('leaderboard-reader'),before);
+  assert.deepEqual(f.store.getSnapshot('20261103'),snapshot);
+  const calls=f.calls();
+  await assert.rejects(f.service.importCookies('malformed'),{code:'COOKIE_FORMAT'});
+  assert.equal(f.calls(),calls);
+ }
+});
+
+test('ranking Cookie import queues behind capture and keepalive uses the new session',async t=>{
+ let release,started;
+ const ready=new Promise(resolve=>{started=resolve;}),wait=new Promise(resolve=>{release=resolve;});
+ const seen=[];
+ const f=fixture(t,{read:async input=>{
+  seen.push(input.cookies[0].value);if(seen.length===1){started();await wait;}
+ }});
+ const capture=f.service.capture();await ready;
+ const importing=f.service.importCookies('sid=updated');assert.equal(f.calls(),1);release();
+ await Promise.all([capture,importing]);await f.service.keepAlive();
+ assert.deepEqual(seen,['test-only','updated','updated']);
+});
+
+test('ranking Cookie import requires an encryption key before accessing the website',async t=>{
+ let called=false;
+ const service=createRankingService({dataDir:'/unused'}, {
+  store:new RankingStore({filename:':memory:',minEntries:2}),
+  reader:{async fetch(){called=true;},async close(){}},
+ });
+ t.after(()=>service.close());
+ await assert.rejects(service.importCookies('sid=test-only'),error=>error.code==='RANK_AUTH'&&error.message.includes('PIU_SESSION_KEY'));
+ assert.equal(called,false);
 });

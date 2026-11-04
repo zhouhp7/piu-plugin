@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {parseGameIds,resolveGameId,normalizeGameIdSelector} from '../src/parser.js';
-import {fetchGameIds,fetchProfile} from '../src/client.js';
+import {fetchGameIds,fetchProfile,readAccount} from '../src/client.js';
 import vm from 'node:vm';
+import {titlePage} from './helpers/title-page.js';
 
 const html=`<div class="subProfile_wrap"><div class="name_w"><p class="t2">ALPHA #1001</p></div></div>
  <div id="game_id_change_modal"><form action="/ajax/user_game_id_change.php"><input name="game_id_change"></form></div>
@@ -41,7 +42,7 @@ test('rename inputs, malformed IDs and repeated cards cannot become switch targe
  assert.equal(parseGameIds(html.replace('value="333"','value="222"')).length,2);
 });
 
-function fakeAccount({breakTarget=false, failTargetNavigation=false, invalidSelection=false, multipleSelection=false, initial='111'}={}) {
+function fakeAccount({breakTarget=false, failTargetNavigation=false, invalidSelection=false, multipleSelection=false, initial='111', brokenTitle=false, mismatchedTitle=false, redirectedTitle=false}={}) {
  let active=initial,domActive=initial,closed=false,currentUrl='about:blank';
  const switches=[];
  const cards=[{id:'111',name:'ALPHA #1001',total:100},{id:'222',name:'BETA #2002',total:200},{id:'333',name:'EMPTY #3003',total:0}];
@@ -49,10 +50,11 @@ function fakeAccount({breakTarget=false, failTargetNavigation=false, invalidSele
   url:()=>currentUrl,
   goto:async url=>{
    if(failTargetNavigation&&active==='222')throw new Error('Navigation failed after POST');
-   currentUrl=url;domActive=active;return{ok:()=>true};
+   currentUrl=redirectedTitle&&url.includes('/title.php')?'https://www.piugame.com/bbs/login.php':url;domActive=active;return{ok:()=>true};
   },
   content:async()=>{
    const card=cards.find(c=>c.id===domActive);
+   if(currentUrl.includes('/title.php'))return brokenTitle?'<h1>maintenance</h1>':titlePage(mismatchedTitle?'WRONG#9999':card.name,{single:14000+card.total,double:17000+card.total});
    const modal=`<div id="profile_modal">${cards.map(c=>`<div class="in_profile"><input name="sub_profile" value="${c.id}" ${!invalidSelection&&(c.id===domActive||(multipleSelection&&c.id==='333'))?'checked':''}><div class="name_w"><p class="t2">${c.name}</p></div></div>`).join('')}</div>`;
    if(breakTarget&&active==='222')return modal+'<h1>maintenance</h1>';
    return `<div class="subProfile_wrap"><div class="name_w"><p class="t2">${invalidSelection?'OUTSIDE #9999':card.name}</p></div></div>${modal}<div class="pumbility_total_wrap"><div class="score">${card.total}</div></div>`+
@@ -83,6 +85,8 @@ test('targeted image data comes from requested card and selection restores on su
  const result=await fetchProfile(account.manager,{}, {gameId:'BETA #2002'});
  assert.equal(result.profile.playerName,'BETA#2002');
  assert.equal(result.profile.pumbility,200);
+ assert.equal(result.profile.titleProgress.playerName,'BETA#2002');
+ assert.equal(result.profile.titleProgress.single.score,14200);
  assert.equal(account.active(),'111');
  const broken=fakeAccount({breakTarget:true});
  await assert.rejects(fetchProfile(broken.manager,{}, {gameId:'BETA#2002'}),{code:'PAGE_CHANGED'});
@@ -113,4 +117,22 @@ test('bare B50 still selects first card regardless of website selection and expl
  assert.deepEqual(account.switches,['111','222']);
  const explicit=fakeAccount();
  assert.equal((await fetchProfile(explicit.manager,{}, {gameId:'BETA#2002'})).profile.playerName,'BETA#2002');
+});
+
+test('login inspection lists all owned profiles without switching the selected profile',async()=>{
+ const account=fakeAccount({initial:'222'}),context=await account.manager.context({});
+ const data=await readAccount(await context.newPage());
+ assert.equal(data.playerName,'BETA#2002');
+ assert.deepEqual(data.gameIds.map(row=>row.id),['111','222','333']);
+ assert.deepEqual(account.switches,[]);assert.equal(account.active(),'222');
+ await context.close();
+});
+
+test('B50 restores the original profile after Title-page failures, mismatches and login redirects',async()=>{
+ for(const [options,code] of [[{brokenTitle:true},'PAGE_CHANGED'],[{mismatchedTitle:true},'GAME_ID_SWITCH_FAILED'],[{redirectedTitle:true},'AUTH_REQUIRED']]){
+  const account=fakeAccount(options);
+  await assert.rejects(fetchProfile(account.manager,{}, {gameId:'BETA#2002'}),{code});
+  assert.equal(account.active(),'111');assert.equal(account.closed(),true);
+  assert.deepEqual(account.switches,['222','111']);
+ }
 });

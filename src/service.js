@@ -1,14 +1,15 @@
 import path from 'node:path';
 import { BrowserManager } from './browser.js';
-import { fetchProfile, fetchRecent, fetchPlayData, fetchGameIds, readProfile, piuOnlyState } from './client.js';
+import { fetchProfile, fetchRecent, fetchPlayData, fetchGameIds, readAccount, piuOnlyState } from './client.js';
 import { Vault } from './vault.js';
 import { createBridge } from './bridge.js';
 import { renderBest50, renderRecent } from './render.js';
 import { PiuError } from './errors.js';
-import { normalizeGameIdSelector } from './parser.js';
+import { normalizeGameIdSelector, resolveGameId } from './parser.js';
 import { enrichProfileRanking } from './profile-ranking.js';
 import { renderPlayData } from './play-data.js';
 import { parseCookieState } from './cookies.js';
+import { accountBindings, sameAccount, mergeAccount } from './account-bindings.js';
 
 export async function createService(config, dependencies = {}) {
   const vault = dependencies.vault ?? new Vault({directory: path.join(config.dataDir, 'sessions'), key: config.key});
@@ -16,7 +17,7 @@ export async function createService(config, dependencies = {}) {
   const getProfile = dependencies.fetchProfile ?? fetchProfile;
   const getRecent = dependencies.fetchRecent ?? fetchRecent;
   const getGameIds = dependencies.fetchGameIds ?? fetchGameIds;
-  const validateLogin = dependencies.readProfile ?? readProfile;
+  const validateLogin = dependencies.readProfile ?? readAccount;
   const render = dependencies.renderBest50 ?? renderBest50;
   const renderRecentImage = dependencies.renderRecent ?? renderRecent;
   const imageTypes = {
@@ -45,22 +46,72 @@ export async function createService(config, dependencies = {}) {
       if (!bucket.size) cache.delete(userKey);
     }
   };
-  const rememberImage = (userKey, selector, png) => {
+  const rememberImage = (userKey, selector, picture) => {
     let bucket = cache.get(userKey);
     if (!bucket) { bucket = new Map(); cache.set(userKey, bucket); }
-    bucket.set(selector, {png, at: Date.now()});
+    bucket.set(selector, {picture, at: Date.now()});
     if (bucket.size > 16) bucket.delete(bucket.keys().next().value);
     trimCaches();
   };
-  const loadSession = async userKey => {
-    const session = await vault.load(userKey);
-    if (!session) throw new PiuError('AUTH_REQUIRED', '请先私聊发送 #piu 登录，扫码绑定自己的账号。');
-    if (Date.now() - session.savedAt > config.sessionMaxAgeMs) {
-      clearUser(userKey);
-      await vault.delete(userKey);
-      throw new PiuError('AUTH_REQUIRED', '保存的登录已到期，请私聊发送 #piu 登录。');
+  const loadBindings = async userKey => {
+    const bindings = accountBindings(await vault.load(userKey));
+    if (!bindings.accounts.length) throw new PiuError('AUTH_REQUIRED', '请先私聊发送 #piu login 扫码，或 #piu login sid=会话值 绑定自己的账号。');
+    return bindings;
+  };
+  const expired = account => account.authExpired || Date.now() - account.savedAt > config.sessionMaxAgeMs;
+  const requireActive = account => {
+    if (expired(account)) throw new PiuError('AUTH_REQUIRED', '该档案所属账号的登录已失效，请重新扫码或导入该账号 Cookie；其他账号仍可使用。');
+  };
+  const bindAccount = async (userKey, state, profile) => {
+    if (!profile?.gameIds?.length) throw new PiuError('PAGE_CHANGED', '未取得账号档案列表，未保存此次绑定。');
+    const verified = piuOnlyState(state);
+    const bindings = accountBindings(await vault.load(userKey));
+    // An old-format session has no profile index yet. Discover it once so a
+    // different login adds an account and a renewed login updates the old one.
+    for (const account of bindings.accounts) {
+      if (account.gameIds?.length || sameAccount(account, verified, profile.gameIds) || expired(account)) continue;
+      try {
+        const result = await getGameIds(browser, account.state);
+        account.gameIds = result.gameIds;
+        account.state = result.state;
+      } catch (error) {
+        if (!(error instanceof PiuError)) throw error;
+        if (error.code === 'AUTH_REQUIRED') account.authExpired = true;
+        // Keep an unavailable old binding; it must not prevent a new login.
+      }
     }
-    return session;
+    await vault.save(userKey, mergeAccount(bindings, verified, profile.gameIds));
+    clearUser(userKey);
+  };
+  const refreshAccounts = async (userKey, bindings) => {
+    const rows = [];
+    for (const [index, account] of bindings.accounts.entries()) {
+      if (!expired(account)) {
+        try {
+          const result = await getGameIds(browser, account.state);
+          account.state = result.state;
+          account.gameIds = result.gameIds;
+        } catch (error) {
+          if (error.code !== 'AUTH_REQUIRED') throw error;
+          account.authExpired = true;
+        }
+      }
+      rows.push(...(account.gameIds ?? []).map(profile => ({...profile, account: index + 1, ...(expired(account) ? {authExpired: true} : {})})));
+    }
+    await vault.save(userKey, bindings);
+    if (!rows.length) throw new PiuError('AUTH_REQUIRED', '保存的账号已无法读取档案，请重新扫码或导入 Cookie。');
+    return rows;
+  };
+  const selectAccount = async (userKey, bindings, selector) => {
+    if (!selector) return bindings.accounts.find(account => !expired(account)) ?? bindings.accounts[0];
+    if (bindings.accounts.length === 1) return bindings.accounts[0];
+    const candidates = () => bindings.accounts.flatMap(account => (account.gameIds ?? []).map(profile => ({...profile, binding: account})));
+    let rows = candidates();
+    try { return resolveGameId(rows, selector).binding; }
+    catch (error) { if (error.code !== 'GAME_ID_NOT_FOUND') throw error; }
+    await refreshAccounts(userKey, bindings);
+    rows = candidates();
+    return resolveGameId(rows, selector).binding;
   };
   const run = async (userKey, query, operation) => {
     if (mutations.has(userKey)) throw new PiuError('BUSY', '账号正在绑定或解绑，请稍后再试。');
@@ -93,29 +144,32 @@ export async function createService(config, dependencies = {}) {
       throw new PiuError('BUSY', '账号正在读取其他成绩，请等待当前操作完成后重试。');
     }
     const cached = cache.get(userKey)?.get(cacheKey);
-    if (cached && Date.now() - cached.at < imageTtl) return cached.png;
+    if (cached && Date.now() - cached.at < imageTtl) return cached.picture;
     return run(userKey, query, async () => {
-      const session = await loadSession(userKey);
+      const bindings = await loadBindings(userKey);
+      const account = await selectAccount(userKey, bindings, selector);
+      requireActive(account);
       summaries.delete(userKey);
       const type = imageTypes[kind];
-      const result = await type.fetch(browser, session.state, {gameId: selector});
+      const result = await type.fetch(browser, account.state, {gameId: selector});
       const profile = enrichProfileRanking(result.profile, {dataDir: config.dataDir});
-      const png = await type.render(profile, {loadImage: url => result.images.get(url) ?? null});
-      await vault.save(userKey, {...session, state: result.state});
-      rememberImage(userKey, cacheKey, png);
-      return png;
+      const picture = await type.render(profile, {loadImage: url => result.images.get(url) ?? null});
+      account.state = result.state;
+      if (result.gameIds?.length) account.gameIds = result.gameIds;
+      await vault.save(userKey, bindings);
+      rememberImage(userKey, cacheKey, picture);
+      return picture;
     });
   };
   const bridge = await (dependencies.createBridge ?? createBridge)({host: config.host, port: config.port, publicUrl: config.publicUrl,
     ttlMs: config.ttlMs, maxSessions: config.maxSessions,
     createLogin: () => browser.createLogin(),
     validateLogin: page => validateLogin(page, {paginate: false}),
-    saveSession: async (userKey, state) => {
+    saveSession: async (userKey, state, profile) => {
       beginMutation(userKey);
       try {
         await pending.get(userKey)?.task.catch(() => {});
-        await vault.save(userKey, {state: piuOnlyState(state), savedAt: Date.now()});
-        clearUser(userKey);
+        await bindAccount(userKey, state, profile);
         const authorization = loginCallbacks.get(userKey);
         if (authorization && authorization.expiresAt > Date.now()) {
           // Only the explicitly requested admin ranking login receives the full state.
@@ -166,9 +220,7 @@ export async function createService(config, dependencies = {}) {
           context = await browser.context(state);
           const profile = await validateLogin(await context.newPage(), {paginate: false});
           if (!profile) throw new PiuError('AUTH_REQUIRED', 'Cookie 未能通过登录验证，请在自己设备重新登录 PIU 官网后再次导出。');
-          const verified = piuOnlyState(await context.storageState());
-          await vault.save(userKey, {state: verified, savedAt: Date.now()});
-          clearUser(userKey);
+          await bindAccount(userKey, await context.storageState(), profile);
           return profile;
         } catch (error) {
           if (error instanceof PiuError) {
@@ -208,17 +260,16 @@ export async function createService(config, dependencies = {}) {
       const cached = summaries.get(userKey);
       if (cached && Date.now() - cached.at < summaryTtl) return structuredClone(cached.gameIds);
       const result = await run(userKey, 'ids', async () => {
-        const session = await loadSession(userKey);
+        const bindings = await loadBindings(userKey);
         // Membership/order changes can change the first-card default, never a full identity.
         const bucket = cache.get(userKey);
         bucket?.delete('b50:');
         bucket?.delete('recent:');
         bucket?.delete('data:');
-        const result = await getGameIds(browser, session.state);
-        await vault.save(userKey, {...session, state: result.state});
-        summaries.set(userKey, {gameIds: structuredClone(result.gameIds), at: Date.now()});
+        const gameIds = await refreshAccounts(userKey, bindings);
+        summaries.set(userKey, {gameIds: structuredClone(gameIds), at: Date.now()});
         trimCaches();
-        return result.gameIds;
+        return gameIds;
       });
       return structuredClone(result);
     },

@@ -5,6 +5,7 @@ import {GRADE_CODES,PLATE_CODES,loadBadgeAssets} from './assets.js';
 import {PiuError} from './errors.js';
 import {formatShanghaiTime} from './time-format.js';
 import {UI_COLORS as C,panel,text} from './ui.js';
+import {encodeOutput,scaledDimension} from './image-output.js';
 
 const clean=value=>String(value??'').replace(/\s+/g,' ').trim();
 const changed=message=>new PiuError('PAGE_CHANGED',message);
@@ -13,7 +14,7 @@ const integer=value=>/^\d[\d,]*$/.test(clean(value))?Number(clean(value).replace
 /** Preserve the official counts and denominators; rows are never summed. */
 export function parsePlayData(html) {
   const $=load(html),profile=$('.subProfile_wrap').first();
-  if($('form#login_fs,input[name="mb_password"]').length&&!profile.length)throw new PiuError('AUTH_REQUIRED','登录已失效，请私聊发送 #piu 登录。');
+  if($('form#login_fs,input[name="mb_password"]').length&&!profile.length)throw new PiuError('AUTH_REQUIRED','登录已失效，请私聊发送 #piu login。');
   if(!profile.length||!$('.play_data_wrap').length)throw changed('未识别到 Play Data 页面，请检查登录状态或更新页面解析器。');
   const playerName=normalizeGameIdSelector(profile.find('.name_w .t2,.profile_name .t2').first().text());
   const playCount=integer($('.playData_tw .total .t2').first().text());
@@ -44,24 +45,25 @@ export function parsePlayData(html) {
     ...sections,pumbility:null,ranking:null,updatedAt:new Date().toISOString(),source:'piugame.com/my_page/play_data.php'};
 }
 
-export const DATA_IMAGE_WIDTH=1800;
+const DATA_LAYOUT_WIDTH=1800;
+export const DATA_IMAGE_WIDTH=scaledDimension(DATA_LAYOUT_WIDTH);
 export async function renderPlayData(profile) {
   if(!profile||!Array.isArray(profile.grades)||!Array.isArray(profile.plates)||
     !Number.isSafeInteger(profile.playCount)||profile.playCount<0||!Number.isSafeInteger(profile.totalCharts)||profile.totalCharts<0)throw new TypeError('Invalid Play Data');
   for(const item of [...profile.grades,...profile.plates])if(!Number.isSafeInteger(item.count)||!Number.isSafeInteger(item.total)||item.count<0||item.count>item.total)throw new TypeError('Invalid Play Data count');
-  const margin=64,gap=18,cellWidth=(DATA_IMAGE_WIDTH-margin*2-gap*3)/4,cellHeight=128;
+  const margin=64,gap=18,cellWidth=(DATA_LAYOUT_WIDTH-margin*2-gap*3)/4,cellHeight=128;
   const gradeTop=480,gradeRows=Math.ceil(profile.grades.length/4);
   const plateTitle=gradeTop+gradeRows*(cellHeight+gap)+46,plateTop=plateTitle+42;
   const footerTop=plateTop+Math.ceil(profile.plates.length/4)*(cellHeight+gap)+24;
-  const canvas=createCanvas(DATA_IMAGE_WIDTH,footerTop+112),ctx=canvas.getContext('2d');
+  const canvas=createCanvas(DATA_LAYOUT_WIDTH,footerTop+112),ctx=canvas.getContext('2d');
   ctx.fillStyle=C.background;ctx.fillRect(0,0,canvas.width,canvas.height);
   ctx.fillStyle=C.cyan;ctx.fillRect(margin,0,440,6);
   text(ctx,'PIU  /  PLAY DATA',margin,80,1300,56,C.cyan,900);
   text(ctx,profile.playerName,margin,171,profile.ranking?1180:1600,80,C.text,900);
-  if(profile.ranking)text(ctx,`WORLD #${profile.ranking}`,DATA_IMAGE_WIDTH-margin,165,430,48,C.purple,700,'right');
+  if(profile.ranking)text(ctx,`WORLD #${profile.ranking}`,DATA_LAYOUT_WIDTH-margin,165,430,48,C.purple,700,'right');
   const stats=[['PLAY COUNT',profile.playCount.toLocaleString('en-US')],
     ['统计谱面',profile.totalCharts.toLocaleString('en-US')],['TOTAL PUMBILITY',profile.pumbility==null?'—':profile.pumbility.toLocaleString('en-US',{maximumFractionDigits:3})]];
-  const statWidth=(DATA_IMAGE_WIDTH-margin*2-gap*2)/3;
+  const statWidth=(DATA_LAYOUT_WIDTH-margin*2-gap*2)/3;
   stats.forEach(([label,value],index)=>{
     const x=margin+index*(statWidth+gap);panel(ctx,x,224,statWidth,154);
     text(ctx,label,x+24,261,statWidth-48,22,C.muted,700);
@@ -90,5 +92,5 @@ export async function renderPlayData(profile) {
   text(ctx,/Freeplay/i.test(profile.playCountNote??'')?'Play Count 不包含 Freeplay；各项数量按官网原值显示。':profile.playCountNote||'各项数量按官网原值显示。',margin,footerTop+22,1672,21,C.muted);
   text(ctx,'SOURCE  /  piugame.com/my_page/play_data.php',margin,footerTop+58,1672,19,C.muted);
   text(ctx,`UPDATE TIME  /  ${formatShanghaiTime(profile.updatedAt)}`,margin,footerTop+88,1672,19,C.muted);
-  return canvas.encode('png');
+  return encodeOutput(canvas);
 }

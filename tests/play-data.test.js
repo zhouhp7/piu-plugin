@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {loadImage} from '@napi-rs/canvas';
 import vm from 'node:vm';
 import {GRADE_CODES,PLATE_CODES} from '../src/assets.js';
 import {parsePlayData,renderPlayData,DATA_IMAGE_WIDTH} from '../src/play-data.js';
@@ -44,10 +45,12 @@ test('Play Data fails on expired login, absent rows, duplicates and invalid coun
 test('Play Data renders original badges and safe zero counts into a complete image',async()=>{
   const profile=parsePlayData(dataPage());
   profile.updatedAt='2026-11-02T16:43:19Z';
-  const png=await renderPlayData(profile);
-  assert.equal(png.subarray(1,4).toString(),'PNG');
-  assert.equal(png.readUInt32BE(16),DATA_IMAGE_WIDTH);
-  assert.ok(png.readUInt32BE(20)>1000);
+  const jpeg=await renderPlayData(profile);
+  assert.equal(jpeg.readUInt16BE(0),0xffd8);
+  const image=await loadImage(jpeg);
+  assert.equal(image.width,DATA_IMAGE_WIDTH);
+  assert.equal(image.width,1200);
+  assert.equal(image.height,1053);
 });
 
 function account({initial='222',broken=false,mismatch=false,redirected=false}={}) {

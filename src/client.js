@@ -1,8 +1,9 @@
-import { PUMBILITY_URL, RECENT_URL, PLAY_DATA_URL, PIU_ORIGIN } from './browser.js';
+import { PUMBILITY_URL, RECENT_URL, PLAY_DATA_URL, TITLE_URL, PIU_ORIGIN } from './browser.js';
 import { parsePumbility, parseRecent, parseGameIds, resolveGameId } from './parser.js';
 import { PiuError } from './errors.js';
 import { getJacketCache } from './jacket-cache.js';
 import { parsePlayData } from './play-data.js';
+import { parseTitleProgress } from './title-progress.js';
 
 export function piuOnlyState(state) {
   return {cookies: (state.cookies ?? []).filter(cookie => ['piugame.com', 'www.piugame.com'].includes(cookie.domain.replace(/^\./, ''))),
@@ -65,6 +66,19 @@ export async function readProfile(page, {paginate = true} = {}) {
   }
   profile.records = profile.records.slice(0, 50);
   return profile;
+}
+
+/** Login metadata identifies every profile belonging to this official account. */
+export async function readAccount(page, {paginate = false} = {}) {
+  const profile = await readProfile(page, {paginate});
+  let gameIds = parseGameIds(await page.content());
+  if (!gameIds.length) {
+    const response = await page.goto(`${PIU_ORIGIN}/my_page/game_id_information.php`, {waitUntil: 'domcontentloaded'});
+    if (!response?.ok() || !page.url().startsWith(`${PIU_ORIGIN}/my_page/`)) throw new PiuError('AUTH_REQUIRED', '未能读取账号档案，请重新登录。');
+    gameIds = parseGameIds(await page.content());
+  }
+  if (!gameIds.length) throw new PiuError('PAGE_CHANGED', '未能识别账号的档案列表，未保存此次绑定。');
+  return {...profile, gameIds};
 }
 
 async function switchGameId(page, target) {
@@ -141,6 +155,15 @@ export async function fetchProfile(browserManager, state, {gameId = ''} = {}) {
     const target = resolveGameId(gameIds, gameId);
     const profile = target && !target.selected ? await selectGameId(target) : initialProfile;
     if (target) { profile.gameId = target.gameId; profile.gameIdTag = target.tag; }
+    let response;
+    try { response = await page.goto(TITLE_URL, {waitUntil: 'domcontentloaded'}); }
+    catch { throw new PiuError('NETWORK', '无法访问 PIU Title 页面，请稍后重试。'); }
+    const location = new URL(page.url());
+    if (location.origin !== PIU_ORIGIN || location.pathname !== '/my_page/title.php') throw new PiuError('AUTH_REQUIRED', 'Title 页面登录已失效，请重新扫码或导入该账号 Cookie。');
+    if (!response?.ok()) throw new PiuError('NETWORK', 'PIU Title 页面返回异常状态，请稍后重试。');
+    const titles = parseTitleProgress(await page.content());
+    if (titles.playerName !== profile.playerName) throw new PiuError('GAME_ID_SWITCH_FAILED', 'Title 页面的档案与 B50 不一致，已停止生成。');
+    profile.titleProgress = titles;
     const images = await profileJackets(browserManager, page, profile);
     return {profile, images, gameIds};
   });
@@ -153,7 +176,7 @@ export async function fetchRecent(browserManager, state, {gameId = ''} = {}) {
     let response;
     try { response = await page.goto(RECENT_URL, {waitUntil: 'domcontentloaded'}); }
     catch { throw new PiuError('NETWORK', '无法访问 PIU 最近游玩页面，请稍后重试。'); }
-    if (!page.url().startsWith(RECENT_URL)) throw new PiuError('AUTH_REQUIRED', '登录已失效，请私聊发送 #piu 登录。');
+    if (!page.url().startsWith(RECENT_URL)) throw new PiuError('AUTH_REQUIRED', '登录已失效，请私聊发送 #piu login。');
     if (!response?.ok()) throw new PiuError('NETWORK', 'PIU 最近游玩页面返回异常状态，请稍后重试。');
     const profile = parseRecent(await page.content());
     if (profile.playerName !== selected.playerName) {
@@ -173,7 +196,7 @@ export async function fetchPlayData(browserManager, state, {gameId = ''} = {}) {
     let response;
     try { response = await page.goto(PLAY_DATA_URL, {waitUntil: 'domcontentloaded'}); }
     catch { throw new PiuError('NETWORK', '无法访问 PIU Play Data 页面，请稍后重试。'); }
-    if (!page.url().startsWith(PLAY_DATA_URL)) throw new PiuError('AUTH_REQUIRED', '登录已失效，请私聊发送 #piu 登录。');
+    if (!page.url().startsWith(PLAY_DATA_URL)) throw new PiuError('AUTH_REQUIRED', '登录已失效，请私聊发送 #piu login。');
     if (!response?.ok()) throw new PiuError('NETWORK', 'PIU Play Data 页面返回异常状态，请稍后重试。');
     const profile = parsePlayData(await page.content());
     if (profile.playerName !== selected.playerName) throw new PiuError('GAME_ID_SWITCH_FAILED', 'Play Data 的 GAME ID 与请求不一致，已停止出图。');

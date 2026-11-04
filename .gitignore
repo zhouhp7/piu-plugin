@@ -2,6 +2,8 @@ node_modules
 .env
 data/
 *.png
+*.jpg
+*.jpeg
 !assets/*.png
 !assets/grades/*.png
 !assets/plates/*.png

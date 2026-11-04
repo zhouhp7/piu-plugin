@@ -86,7 +86,7 @@ export function parseRecent(html, {baseUrl = 'https://www.piugame.com'} = {}) {
   const $ = load(html);
   const profile = $('.subProfile_wrap').first();
   if ($('form#login_fs, input[name="mb_password"]').length && !profile.length) {
-    throw new PiuError('AUTH_REQUIRED', '登录已失效，请私聊发送 #piu 登录。');
+    throw new PiuError('AUTH_REQUIRED', '登录已失效，请私聊发送 #piu login。');
   }
   if (!$('.recently_playe_wrap .recently_playeList').length || !profile.length) {
     throw new PiuError('PAGE_CHANGED', '未识别到最近游玩页面，请检查登录状态或更新页面解析器。');
@@ -135,7 +135,7 @@ export function parsePumbility(html, {baseUrl = 'https://www.piugame.com', offse
   const $ = load(html);
   const hasProfile = $('.subProfile_wrap .in_profile, .subProfile_wrap .profile_name').length > 0;
   if ($('form#login_fs, input[name="mb_password"]').length && !hasProfile) {
-    throw new PiuError('AUTH_REQUIRED', '登录已失效，请私聊发送 #piu 登录。');
+    throw new PiuError('AUTH_REQUIRED', '登录已失效，请私聊发送 #piu login。');
   }
   if (!$('.pumbility_total_wrap').length) {
     throw new PiuError('PAGE_CHANGED', '未识别到 Pumbility 页面；请检查登录状态或更新页面解析器。');

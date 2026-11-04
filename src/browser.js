@@ -5,6 +5,7 @@ export const PIU_ORIGIN = 'https://www.piugame.com';
 export const PUMBILITY_URL = PIU_ORIGIN + '/my_page/pumbility.php';
 export const RECENT_URL = PIU_ORIGIN + '/my_page/recently_played.php';
 export const PLAY_DATA_URL = PIU_ORIGIN + '/my_page/play_data.php';
+export const TITLE_URL = PIU_ORIGIN + '/my_page/title.php';
 const HOSTS = new Set(['piugame.com', 'www.piugame.com', 'api.am-pass.net', 'am-pass.net', 'www.am-pass.net']);
 export function isOfficialUrl(value) {
   try {

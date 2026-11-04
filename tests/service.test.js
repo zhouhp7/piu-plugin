@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createService } from '../src/service.js';
 import { PiuError } from '../src/errors.js';
+import { accountBindings } from '../src/account-bindings.js';
 
 function gate() {
   let release, started;
@@ -9,8 +10,11 @@ function gate() {
     release: () => release(), start: () => started()};
 }
 const state = label => ({cookies: [{name: 'sid', domain: '.piugame.com', path: '/', value: label}], origins: []});
+const ids = [{id: 'bound', uid: 'uid1', playerName: 'ZANTING#9403', gameId: 'ZANTING', tag: '#9403', selected: true, pumbility: 17841.83, recordCount: 50}];
+const loginProfile = {playerName: 'ZANTING#9403', gameIds: ids};
+const firstState = saved => accountBindings(saved).accounts[0].state;
 async function fixture(t, overrides = {}) {
-  const records = new Map([['owner', {state: state('old'), savedAt: Date.now()}]]);
+  const records = overrides.records ?? new Map([['owner', {state: state('old'), savedAt: Date.now()}]]);
   const calls = {fetch: [], recent: [], data: [], ids: 0, saves: [], deletes: [], imports: [], closes: 0, revokes: []};
   let callbacks;
   const vault = {
@@ -26,10 +30,10 @@ async function fixture(t, overrides = {}) {
     }},
     readProfile: async (page, options) => {
       assert.equal(options.paginate, false);
-      if (overrides.onValidate) return overrides.onValidate(page);
-      return {playerName: 'IMPORTED#1234'};
+      const profile = overrides.onValidate ? await overrides.onValidate(page) : loginProfile;
+      return profile ? {...profile, gameIds: profile.gameIds ?? ids} : profile;
     },
-    createBridge: async options => { callbacks = options; return {async createTicket() {
+    createBridge: async options => { callbacks = {...options, saveSession: (key, saved, profile = loginProfile) => options.saveSession(key, saved, profile)}; return {async createTicket() {
       if (overrides.onTicket) await overrides.onTicket();
       return {url: 'http://localhost/login', expiresAt: overrides.ticketExpiresAt ?? Date.now() + 300000};
     }, async revoke(key) { calls.revokes.push(key); }, async close() {}}; },
@@ -50,8 +54,8 @@ async function fixture(t, overrides = {}) {
     },
     fetchGameIds: async (_browser, saved) => {
       calls.ids++;
-      if (overrides.onIds) await overrides.onIds();
-      return {gameIds: [{id: 'bound', uid: 'uid1', playerName: 'ZANTING#9403', gameId: 'ZANTING', tag: '#9403', selected: true, pumbility: 17841.83, recordCount: 50}], state: saved};
+      const custom = overrides.onIds ? await overrides.onIds(saved) : null;
+      return {gameIds: custom ?? ids, state: saved};
     },
     renderBest50: async profile => Buffer.from(profile.label),
     renderRecent: async profile => Buffer.from(`recent:${profile.label}`),
@@ -234,14 +238,14 @@ test('explicit ranking login receives full state only once after normal user sta
   const fullState = {cookies: [...state('ranking').cookies, {name:'sso', domain:'api.am-pass.net', path:'/', value:'sso-state'}], origins: []};
   const received = [];
   await f.service.login('owner', {onBoundSession: async value => {
-    assert.equal(f.records.get('owner').state.cookies.length, 1);
+    assert.equal(firstState(f.records.get('owner')).cookies.length, 1);
     received.push(value);
   }});
   await f.callbacks.saveSession('owner', fullState);
   await f.callbacks.saveSession('owner', fullState);
   assert.equal(received.length, 1);
   assert.strictEqual(received[0], fullState);
-  assert.equal(f.records.get('owner').state.cookies.some(cookie => cookie.domain === 'api.am-pass.net'), false);
+  assert.equal(firstState(f.records.get('owner')).cookies.some(cookie => cookie.domain === 'api.am-pass.net'), false);
 });
 
 test('ordinary replacement login and unbind revoke pending global-ranking authorization', async t => {
@@ -279,7 +283,7 @@ test('Cookie import verifies first, saves refreshed PIU state, clears caches and
   const refreshed = {cookies: [...state('refreshed').cookies, {name: 'sso', value: 'foreign', domain: 'api.am-pass.net', path: '/'}], origins: []};
   const f = await fixture(t, {importedState: refreshed, onValidate: async page => {
     assert.equal(page.saved.cookies[0].value, 'submitted');
-    assert.equal(f.records.get('owner').state.cookies[0].value, 'old');
+    assert.equal(firstState(f.records.get('owner')).cookies[0].value, 'old');
     return {playerName: 'IMPORTED#1234'};
   }});
   const cached = await f.service.best50('owner');
@@ -288,8 +292,8 @@ test('Cookie import verifies first, saves refreshed PIU state, clears caches and
   await f.service.login('owner', {onBoundSession: async () => { authorized++; }});
   const profile = await f.service.importCookies('owner', 'sid=submitted');
   assert.equal(profile.playerName, 'IMPORTED#1234');
-  assert.equal(f.records.get('owner').state.cookies[0].value, 'refreshed');
-  assert.equal(f.records.get('owner').state.cookies.length, 1);
+  assert.equal(firstState(f.records.get('owner')).cookies[0].value, 'refreshed');
+  assert.equal(firstState(f.records.get('owner')).cookies.length, 1);
   assert.deepEqual(f.calls.revokes, ['owner']);
   assert.equal(f.calls.closes, 1);
   assert.equal(authorized, 0);
@@ -306,7 +310,7 @@ test('invalid or rejected Cookie imports preserve the existing session and cache
     const cached = await f.service.best50('owner');
     const priorSaves = f.calls.saves.length;
     await assert.rejects(f.service.importCookies('owner', 'sid=secret-never-echo'), error => !error.message.includes('secret-never-echo'));
-    assert.equal(f.records.get('owner').state.cookies[0].value, 'old');
+    assert.equal(firstState(f.records.get('owner')).cookies[0].value, 'old');
     assert.equal(f.calls.saves.length, priorSaves);
     assert.strictEqual(await f.service.best50('owner'), cached);
     assert.equal(f.calls.closes, 1);
@@ -365,4 +369,86 @@ test('Cookie validations share the global fetch limit and release it after failu
   await Promise.all(attempts);
   await assert.rejects(f.service.importCookies('d', 'sid=submitted'), {code: 'AUTH_REQUIRED'});
   assert.equal(f.calls.closes, 4);
+});
+
+const secondIds = [{id:'other-bound', uid:'uid1', playerName:'SECOND#2222', gameId:'SECOND', tag:'#2222', selected:true, pumbility:1234, recordCount:2}];
+const secondProfile = {playerName:'SECOND#2222', gameIds:secondIds};
+const accountIds = saved => saved.cookies[0].value.startsWith('second') ? secondIds : ids;
+
+test('QR binding adds another account, migrates legacy storage and merges every profile', async t => {
+  const f = await fixture(t, {onIds:accountIds});
+  await f.callbacks.saveSession('owner', state('second'), secondProfile);
+  const saved = f.records.get('owner');
+  assert.equal(saved.version, 2);
+  assert.equal(saved.accounts.length, 2);
+  assert.equal(saved.accounts[0].state.cookies[0].value, 'old');
+  const merged = await f.service.gameIds('owner');
+  assert.deepEqual(merged.map(row => [row.playerName,row.account]), [['ZANTING#9403',1],['SECOND#2222',2]]);
+  assert.equal((await f.service.best50('owner')).toString(), 'old:current');
+  for (const [method,prefix] of [['best50',''],['recent','recent:'],['data','data:']]) {
+    assert.equal((await f.service[method]('owner','SECOND#2222')).toString(), `${prefix}second:SECOND#2222`);
+  }
+  await assert.rejects(f.service.best50('another','SECOND#2222'), {code:'AUTH_REQUIRED'});
+});
+
+test('Cookie binding appends and refreshes one account without duplicates and survives restart', async t => {
+  const options = {onIds:accountIds, onValidate:async () => secondProfile};
+  const f = await fixture(t, options);
+  await f.service.importCookies('owner','sid=second');
+  const first = structuredClone(f.records.get('owner').accounts[0]);
+  await f.service.importCookies('owner','sid=second-renewed');
+  assert.equal(f.records.get('owner').accounts.length, 2);
+  assert.deepEqual(f.records.get('owner').accounts[0], first);
+  assert.equal((await f.service.best50('owner','SECOND#2222')).toString(), 'second-renewed:SECOND#2222');
+  const before = structuredClone(f.records.get('owner'));
+  options.onValidate = async () => {throw new PiuError('AUTH_REQUIRED','expired');};
+  await assert.rejects(f.service.importCookies('owner','sid=invalid'),{code:'AUTH_REQUIRED'});
+  assert.deepEqual(f.records.get('owner'),before);
+  await f.service.close();
+  const restarted = await fixture(t,{records:f.records,onIds:accountIds});
+  assert.equal((await restarted.service.gameIds('owner')).length,2);
+  assert.equal((await restarted.service.data('owner','ZANTING#9403')).toString(),'data:old:ZANTING#9403');
+});
+
+test('renewed QR login recognizes renamed profiles and preserves account order', async t => {
+  const f = await fixture(t,{onIds:accountIds});
+  await f.callbacks.saveSession('owner',state('second'),secondProfile);
+  const renamed = {...ids[0],playerName:'RENAMED#9403',gameId:'RENAMED'};
+  await f.callbacks.saveSession('owner',state('renewed-old'),{playerName:renamed.playerName,gameIds:[renamed]});
+  const saved = f.records.get('owner');
+  assert.equal(saved.accounts.length,2);
+  assert.equal(saved.accounts[0].gameIds[0].playerName,'RENAMED#9403');
+  assert.equal(saved.accounts[1].state.cookies[0].value,'second');
+  assert.equal((await f.service.best50('owner','RENAMED#9403')).toString(),'renewed-old:RENAMED#9403');
+});
+
+test('expired accounts are marked while healthy accounts remain usable, and unbind removes all', async t => {
+  const records = new Map([['owner',{version:2,accounts:[
+    {id:'first',state:state('expired'),savedAt:Date.now()-2*86400000,gameIds:ids},
+    {id:'second',state:state('second'),savedAt:Date.now(),gameIds:secondIds},
+  ]}]]);
+  const f = await fixture(t,{records,onIds:accountIds});
+  const rows = await f.service.gameIds('owner');
+  assert.equal(rows.length,2);
+  assert.equal(rows[0].authExpired,true);
+  assert.equal(rows[1].authExpired,undefined);
+  assert.equal(f.calls.ids,1);
+  assert.equal((await f.service.best50('owner')).toString(),'second:current');
+  await assert.rejects(f.service.best50('owner','ZANTING#9403'),{code:'AUTH_REQUIRED'});
+  assert.equal((await f.service.best50('owner','SECOND#2222')).toString(),'second:SECOND#2222');
+  await f.service.unbind('owner');
+  assert.equal(records.has('owner'),false);
+  await assert.rejects(f.service.gameIds('owner'),{code:'AUTH_REQUIRED'});
+  await assert.rejects(f.service.best50('owner','SECOND#2222'),{code:'AUTH_REQUIRED'});
+});
+
+test('an unavailable legacy session cannot prevent adding a healthy account', async t => {
+  const f = await fixture(t,{onIds:async saved => {
+    if(saved.cookies[0].value==='old') throw new PiuError('AUTH_REQUIRED','expired');
+    return secondIds;
+  }});
+  await f.callbacks.saveSession('owner',state('second'),secondProfile);
+  assert.equal(f.records.get('owner').accounts.length,2);
+  assert.deepEqual((await f.service.gameIds('owner')).map(row=>row.playerName),['SECOND#2222']);
+  assert.equal(f.records.get('owner').accounts[0].authExpired,true);
 });

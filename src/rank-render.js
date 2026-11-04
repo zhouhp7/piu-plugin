@@ -1,6 +1,8 @@
 import { createCanvas } from '@napi-rs/canvas';
+import {encodeOutput,scaledDimension} from './image-output.js';
 
-export const RANK_IMAGE_WIDTH = 1800;
+const RANK_LAYOUT_WIDTH = 1800;
+export const RANK_IMAGE_WIDTH = scaledDimension(RANK_LAYOUT_WIDTH);
 const FONT = 'Arial, "Noto Sans CJK SC", "Noto Sans", "Microsoft YaHei", "PingFang SC", sans-serif';
 const INK = '#172333';
 const MUTED = '#627185';
@@ -166,7 +168,7 @@ function rowOrder(left, right) {
 }
 
 /**
- * Render a self-contained table PNG with no network/image asset reads.
+ * Render a self-contained JPEG table at two-thirds layout size with no network/image asset reads.
  * Missing snapshots and players outside the global top 1000 stay missing;
  * only real paired observations produce numeric changes.
  * @returns {Promise<Buffer>}
@@ -198,13 +200,13 @@ export async function renderRankComparison({ title, current, previous = null, ro
   if (rawSourceTime) footerLines.push('* 带时区数据统一显示为 GMT+8；未标明时区的数据保留官网原文。');
   const tableBottom = TABLE_TOP + HEADER_HEIGHT + bodyHeight;
   const height = tableBottom + 54 + footerLines.length * 32;
-  const canvas = createCanvas(RANK_IMAGE_WIDTH, height);
+  const canvas = createCanvas(RANK_LAYOUT_WIDTH, height);
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#f2f5f8'; ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = '#ffffff'; ctx.fillRect(MARGIN, 24, TABLE_WIDTH, 180);
   ctx.fillStyle = '#163b66'; ctx.fillRect(MARGIN, 24, 7, 180);
   text(ctx, title || 'PIU PHOENIX 2 · PUMBILITY 关注榜', MARGIN + 26, 61, 1280, 34, INK, 700, 'left');
-  text(ctx, scopeLabel || '全球前 1000', RANK_IMAGE_WIDTH - MARGIN - 22, 60, 350, 23, MUTED, 600, 'right');
+  text(ctx, scopeLabel || '全球前 1000', RANK_LAYOUT_WIDTH - MARGIN - 22, 60, 350, 23, MUTED, 600, 'right');
   text(ctx, `本次：${sourceLabel(current)}    对比：${sourceLabel(previous)}`, MARGIN + 26, 105, TABLE_WIDTH - 52, 24, INK, 400, 'left');
   text(ctx, `实际采集：${formatRankCaptureTime(current.capturedAt)}（GMT+8）${previous ? `   /   前次：${formatRankCaptureTime(previous.capturedAt)}` : ''}`, MARGIN + 26, 143, TABLE_WIDTH - 52, 22, MUTED, 400, 'left');
   const sourceUpdated = current.sourceUpdatedAt ? `   ·   官网更新时间：${lastPlayedLabel(current.sourceUpdatedAt)}` : '';
@@ -246,7 +248,7 @@ export async function renderRankComparison({ title, current, previous = null, ro
     ctx.strokeStyle = '#bdc7d3'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(MARGIN, y + 0.5); ctx.lineTo(MARGIN + TABLE_WIDTH, y + 0.5); ctx.stroke();
   }
-  if (!prepared.length) text(ctx, '尚未关注玩家 · 使用 #piu follow 名称#四位标签 添加', RANK_IMAGE_WIDTH / 2, y + 49, TABLE_WIDTH - 80, 26, MUTED);
+  if (!prepared.length) text(ctx, '尚未关注玩家 · 使用 #piu follow 名称#四位标签 添加', RANK_LAYOUT_WIDTH / 2, y + 49, TABLE_WIDTH - 80, 26, MUTED);
   ctx.strokeStyle = '#aab7c7'; ctx.lineWidth = 1;
   x = MARGIN;
   for (const column of columns) {
@@ -255,5 +257,5 @@ export async function renderRankComparison({ title, current, previous = null, ro
   }
   ctx.strokeRect(MARGIN + 0.5, TABLE_TOP + 0.5, TABLE_WIDTH, tableBottom - TABLE_TOP);
   footerLines.forEach((line, index) => text(ctx, line, MARGIN + 2, tableBottom + 34 + index * 32, TABLE_WIDTH - 4, 21, MUTED, 400, 'left'));
-  return canvas.toBuffer('image/png');
+  return encodeOutput(canvas);
 }

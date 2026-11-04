@@ -2,6 +2,7 @@ import { createCanvas, loadImage as decodeImage } from '@napi-rs/canvas';
 import { loadBadgeAssets } from './assets.js';
 import { normalizeProfile } from './model.js';
 import { formatShanghaiTime } from './time-format.js';
+import {encodeOutput, scaledDimension} from './image-output.js';
 
 export const CARD_WIDTH = 600;
 export const CARD_HEIGHT = 260;
@@ -12,8 +13,13 @@ const PAGE_MARGIN = 80;
 const GRID_TOP = 264;
 const GRID_BOTTOM = GRID_TOP + CARD_HEIGHT * GRID_ROWS + GRID_GAP * (GRID_ROWS - 1);
 const FOOTER_LINE = GRID_BOTTOM + 34;
-export const IMAGE_WIDTH = PAGE_MARGIN * 2 + CARD_WIDTH * GRID_COLUMNS + GRID_GAP * (GRID_COLUMNS - 1);
-export const IMAGE_HEIGHT = FOOTER_LINE + 84;
+const LAYOUT_WIDTH = PAGE_MARGIN * 2 + CARD_WIDTH * GRID_COLUMNS + GRID_GAP * (GRID_COLUMNS - 1);
+export const TITLE_PANEL_HEIGHT = 172;
+const RECENT_LAYOUT_HEIGHT = FOOTER_LINE + 84;
+const LAYOUT_HEIGHT = RECENT_LAYOUT_HEIGHT + TITLE_PANEL_HEIGHT;
+export const IMAGE_WIDTH = scaledDimension(LAYOUT_WIDTH);
+export const IMAGE_HEIGHT = scaledDimension(LAYOUT_HEIGHT);
+export const RECENT_IMAGE_HEIGHT = scaledDimension(RECENT_LAYOUT_HEIGHT);
 
 const COLORS = {
   cyan: '#60f0ed', pink: '#ff69b4', ink: '#090e1b', light: '#f3f7ff', muted: '#91a3bc',
@@ -168,37 +174,67 @@ async function loadImages(profile, options) {
   return images;
 }
 
-function drawBackground(ctx) {
-  const bg = ctx.createLinearGradient(0, 0, IMAGE_WIDTH, IMAGE_HEIGHT);
+function drawBackground(ctx, height) {
+  const bg = ctx.createLinearGradient(0, 0, LAYOUT_WIDTH, height);
   bg.addColorStop(0, '#111b30'); bg.addColorStop(0.46, '#0a1020'); bg.addColorStop(1, '#0a0e1a');
-  ctx.fillStyle = bg; ctx.fillRect(0, 0, IMAGE_WIDTH, IMAGE_HEIGHT);
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, LAYOUT_WIDTH, height);
   const glow = ctx.createRadialGradient(1950, 110, 0, 1950, 110, 880);
   glow.addColorStop(0, '#ea41831b'); glow.addColorStop(1, '#ea418300');
-  ctx.fillStyle = glow; ctx.fillRect(0, 0, IMAGE_WIDTH, 1000);
+  ctx.fillStyle = glow; ctx.fillRect(0, 0, LAYOUT_WIDTH, 1000);
   const cyanGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, 950);
   cyanGlow.addColorStop(0, '#22d9dd12'); cyanGlow.addColorStop(1, '#22d9dd00');
   ctx.fillStyle = cyanGlow; ctx.fillRect(0, 0, 1100, 1100);
   ctx.strokeStyle = '#ffffff03'; ctx.lineWidth = 1;
-  for (let x = 0; x <= IMAGE_WIDTH; x += 44) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, IMAGE_HEIGHT); ctx.stroke(); }
-  for (let y = 0; y <= IMAGE_HEIGHT; y += 44) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(IMAGE_WIDTH, y); ctx.stroke(); }
+  for (let x = 0; x <= LAYOUT_WIDTH; x += 44) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke(); }
+  for (let y = 0; y <= height; y += 44) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(LAYOUT_WIDTH, y); ctx.stroke(); }
   ctx.fillStyle = COLORS.cyan; ctx.fillRect(80, 0, 440, 6);
   ctx.fillStyle = COLORS.pink; ctx.fillRect(532, 0, 110, 6);
+}
+
+function drawTitleProgress(ctx, profile, family) {
+  const gap = 32, width = (LAYOUT_WIDTH - PAGE_MARGIN * 2 - gap) / 2;
+  const tierColors = {BEGINNER:COLORS.muted, INTERMEDIATE:'#ffca28', ADVANCED:COLORS.cyan, EXPERT:'#bd9aff', MASTER:'#ff83bd'};
+  for (const [index, mode] of ['single', 'double'].entries()) {
+    const x = PAGE_MARGIN + index * (width + gap), y = GRID_TOP;
+    const value = profile.titleProgress[mode];
+    const color = tierColors[value?.tier] ?? COLORS.muted;
+    panel(ctx, x, y, width, 142, 16, '#152035', '#35465e');
+    ctx.fillStyle = LEVEL_COLORS[mode === 'single' ? 'S' : 'D'];
+    ctx.beginPath(); ctx.arc(x + 28, y + 32, 7, 0, Math.PI * 2); ctx.fill();
+    fitText(ctx, mode.toUpperCase(), x + 45, y + 41, 170, 26, COLORS.light, 700, family);
+    fitText(ctx, value?.title ?? 'TITLE UNAVAILABLE', x + 216, y + 41, width - 520, 30, color, 700, family);
+    ctx.textAlign = 'right';
+    // Truncating avoids showing 100% before the next title is actually reached.
+    const percent = value ? `${Math.floor(value.percent * 10) / 10}%` : '—';
+    fitText(ctx, value?.maxed ? '100% · MAX' : percent, x + width - 24, y + 41, 240, 28, color, 700, family);
+    ctx.textAlign = 'left';
+    const score = !value ? '—' : value.score === null ? `≥ ${formatNumber(value.minimum, 2)}` : formatNumber(value.score, 2);
+    const next = value?.nextThreshold === null ? '' : ` / ${formatNumber(value?.nextThreshold, 2)}`;
+    fitText(ctx, `SCORE  ${score}${value ? next : ''}`, x + 24, y + 80, width / 2 - 24, 24, COLORS.muted, 400, family);
+    ctx.textAlign = 'right';
+    fitText(ctx, value?.maxed ? 'HIGHEST TITLE REACHED' : value?.nextTitle ? `NEXT  ${value.nextTitle}` : 'Title page data unavailable', x + width - 24, y + 80, width / 2 - 24, 23, COLORS.muted, 400, family);
+    ctx.textAlign = 'left';
+    const trackX = x + 24, trackY = y + 102, trackWidth = width - 48, trackHeight = 18;
+    panel(ctx, trackX, trackY, trackWidth, trackHeight, 9, '#263247');
+    const filled = trackWidth * (value?.percent ?? 0) / 100;
+    if (filled > 0) panel(ctx, trackX, trackY, filled, trackHeight, Math.min(9, filled / 2), color);
+  }
 }
 
 function drawHeader(ctx, profile, images, family) {
   const recent = profile.kind === 'recent';
   fitText(ctx, recent ? 'PIU  /  RECENTLY PLAYED' : 'PIU  /  PERSONAL PERFORMANCE', 80, 67, 1200, 23, COLORS.cyan, 700, family);
   ctx.textAlign = 'right';
-  fitText(ctx, profile.demo ? 'FABRICATED DEMO DATA' : recent ? 'PIUGAME.COM  /  RECENTLY PLAYED' : 'PIUGAME.COM  /  MY PUMBILITY', IMAGE_WIDTH - 80, 67, 850, 21,
+  fitText(ctx, profile.demo ? 'FABRICATED DEMO DATA' : recent ? 'PIUGAME.COM  /  RECENTLY PLAYED' : 'PIUGAME.COM  /  MY PUMBILITY', LAYOUT_WIDTH - 80, 67, 850, 21,
     profile.demo ? '#ffb88c' : COLORS.muted, 700, family);
   ctx.textAlign = 'left';
   fitText(ctx, recent ? 'RECENT' : 'PUMBILITY', 76, 185, 1130, 90, COLORS.light, 900, family);
   fitText(ctx, recent ? '50 PLAYS' : 'BEST 50', recent ? 530 : 706, 185, recent ? 580 : 1000, 90, COLORS.cyan, 900, family);
 
   const infoX = 1150;
-  const gradient = ctx.createLinearGradient(infoX, 84, IMAGE_WIDTH - 80, 212);
+  const gradient = ctx.createLinearGradient(infoX, 84, LAYOUT_WIDTH - 80, 212);
   gradient.addColorStop(0, '#1a2a40'); gradient.addColorStop(1, '#171e32');
-  panel(ctx, infoX, 84, IMAGE_WIDTH - infoX - 80, 128, 18, gradient, '#40536b');
+  panel(ctx, infoX, 84, LAYOUT_WIDTH - infoX - 80, 128, 18, gradient, '#40536b');
   ctx.fillStyle = COLORS.cyan; ctx.fillRect(infoX, 108, 4, 80);
   if (!imageCover(ctx, images.get(profile.avatar), 1170, 115, 72, 72, 16)) {
     panel(ctx, 1170, 115, 72, 72, 16, '#273f53', '#4c7182');
@@ -221,12 +257,12 @@ function drawHeader(ctx, profile, images, family) {
   }
 
   ctx.textAlign = 'right';
-  fitText(ctx, `${profile.records.length} / 50 RECORDS`, IMAGE_WIDTH - 455, 237, 600, 18, COLORS.muted, 400, family);
+  fitText(ctx, `${profile.records.length} / 50 RECORDS`, LAYOUT_WIDTH - 455, 237, 600, 18, COLORS.muted, 400, family);
   ctx.textAlign = 'left';
   for (const [offset, mode, label] of [[386, 'S', 'SINGLE'], [207, 'D', 'DOUBLE']]) {
     ctx.fillStyle = LEVEL_COLORS[mode];
-    ctx.beginPath(); ctx.arc(IMAGE_WIDTH - offset, 230, 9, 0, Math.PI * 2); ctx.fill();
-    fitText(ctx, label, IMAGE_WIDTH - offset + 18, 237, 132, 18, COLORS.muted, 400, family);
+    ctx.beginPath(); ctx.arc(LAYOUT_WIDTH - offset, 230, 9, 0, Math.PI * 2); ctx.fill();
+    fitText(ctx, label, LAYOUT_WIDTH - offset + 18, 237, 132, 18, COLORS.muted, 400, family);
   }
 }
 
@@ -316,23 +352,24 @@ function drawCard(ctx, record, slot, x, y, images, badges, family, isDemo, recen
   drawLevel(ctx, record, detailsX + detailsWidth - 38, badgesY + 36, family);
 }
 
-function drawFooter(ctx, profile, family) {
+function drawFooter(ctx, profile, family, offset) {
   const recent = profile.kind === 'recent';
-  ctx.fillStyle = '#354258'; ctx.fillRect(80, FOOTER_LINE, IMAGE_WIDTH - 160, 1);
+  const footerLine = FOOTER_LINE + offset;
+  ctx.fillStyle = '#354258'; ctx.fillRect(80, footerLine, LAYOUT_WIDTH - 160, 1);
   fitText(ctx, profile.demo
     ? 'DEMO ONLY  /  Names, scores and ratings are fabricated. Jackets are procedural; grade and plate badges are official assets.'
     : recent
       ? 'SOURCE  /  piugame.com/my_page/recently_played.php  ·  Game scores  ·  Newest first  ·  Times: GMT+8'
-      : 'SOURCE  /  piugame.com/my_page/pumbility.php  ·  Official order preserved  ·  Missing values shown as —',
-  80, FOOTER_LINE + 34, IMAGE_WIDTH - 160, 18, profile.demo ? '#ffb88c' : COLORS.muted, 400, family);
-  fitText(ctx, `UPDATE TIME  /  ${formatShanghaiTime(profile.updatedAt)}`, 80, FOOTER_LINE + 63, 1450, 17, '#6d809b', 400, family);
+      : 'SOURCE  /  piugame.com/my_page/pumbility.php + title.php  ·  Official order preserved  ·  Title progress within the current level',
+  80, footerLine + 34, LAYOUT_WIDTH - 160, 18, profile.demo ? '#ffb88c' : COLORS.muted, 400, family);
+  fitText(ctx, `UPDATE TIME  /  ${formatShanghaiTime(profile.updatedAt)}`, 80, footerLine + 63, 1450, 17, '#6d809b', 400, family);
   ctx.textAlign = 'right';
-  fitText(ctx, `PIU ${recent ? 'RECENT' : 'BEST50'}  /  COMMUNITY TOOL  ·  NOT AFFILIATED WITH ANDAMIRO`, IMAGE_WIDTH - 80, FOOTER_LINE + 63, 1120, 15, '#6d809b', 400, family);
+  fitText(ctx, `PIU ${recent ? 'RECENT' : 'BEST50'}  /  COMMUNITY TOOL  ·  NOT AFFILIATED WITH ANDAMIRO`, LAYOUT_WIDTH - 80, footerLine + 63, 1120, 15, '#6d809b', 400, family);
   ctx.textAlign = 'left';
 }
 
 /**
- * Render an original 5-column × 10-row Best50 PNG.
+ * Render a 5-column × 10-row Best50 JPEG at two-thirds layout size.
  *
  * Official grade and plate images are read only from the bundled asset
  * manifest. Other image reads require the caller's options.loadImage(source),
@@ -349,17 +386,19 @@ export async function renderBest50(input, options = {}) {
   const family = typeof options.fontFamily === 'string' && options.fontFamily.trim()
     ? options.fontFamily : DEFAULT_FONT;
   const [images, badges] = await Promise.all([loadImages(profile, options), loadBadgeImages()]);
-  const canvas = createCanvas(IMAGE_WIDTH, IMAGE_HEIGHT);
+  const offset = profile.kind === 'recent' ? 0 : TITLE_PANEL_HEIGHT;
+  const canvas = createCanvas(LAYOUT_WIDTH, RECENT_LAYOUT_HEIGHT + offset);
   const ctx = canvas.getContext('2d');
   ctx.textAlign = 'left';
-  drawBackground(ctx);
+  drawBackground(ctx, canvas.height);
   drawHeader(ctx, profile, images, family);
+  if (offset) drawTitleProgress(ctx, profile, family);
   for (let slot = 0; slot < GRID_COLUMNS * GRID_ROWS; slot += 1) {
     drawCard(ctx, profile.records[slot], slot, PAGE_MARGIN + (slot % GRID_COLUMNS) * (CARD_WIDTH + GRID_GAP),
-      GRID_TOP + Math.floor(slot / GRID_COLUMNS) * (CARD_HEIGHT + GRID_GAP), images, badges, family, profile.demo, profile.kind === 'recent');
+      GRID_TOP + offset + Math.floor(slot / GRID_COLUMNS) * (CARD_HEIGHT + GRID_GAP), images, badges, family, profile.demo, profile.kind === 'recent');
   }
-  drawFooter(ctx, profile, family);
-  return canvas.encode('png');
+  drawFooter(ctx, profile, family, offset);
+  return encodeOutput(canvas);
 }
 
 /** Recent plays use raw game scores and preserve repeated charts and play times. */

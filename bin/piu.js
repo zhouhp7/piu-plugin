@@ -9,9 +9,7 @@ import { renderBest50 } from '../src/render.js';
 import { parsePumbility } from '../src/parser.js';
 import { createService } from '../src/service.js';
 import { BrowserManager } from '../src/browser.js';
-import { readProfile, piuOnlyState } from '../src/client.js';
-import { Vault } from '../src/vault.js';
-import QRCode from 'qrcode';
+import {renderLoginQr} from '../src/login-qr.js';
 
 const [command, ...args] = process.argv.slice(2);
 async function save(file, data) {
@@ -28,9 +26,9 @@ async function main() {
     return;
   }
   if (command === 'render') {
-    if (!args[0]) throw new Error('用法: render <profile.json> [output.png]');
+    if (!args[0]) throw new Error('用法: render <profile.json> [output.jpg]');
     const input = JSON.parse(await readFile(args[0], 'utf8'));
-    await save(args[1] || 'best50.png', await renderBest50(input));
+    await save(args[1] || 'best50.jpg', await renderBest50(input));
     return;
   }
   if (command === 'parse') {
@@ -43,14 +41,16 @@ async function main() {
     const config = loadConfig();
     const browser = new BrowserManager({...config, headless: false});
     const rl = createInterface({input: process.stdin, output: process.stdout});
+    let service;
     try {
-      const {context, page} = await browser.createLogin();
+      const {context} = await browser.createLogin();
       await rl.question('请在打开的官方网页中完成登录，然后回到终端按回车。');
-      const profile = await readProfile(page, {paginate: false});
-      const vault = new Vault({directory: path.join(config.dataDir, 'sessions'), key: config.key});
-      await vault.save(args[0] || 'local', {state: piuOnlyState(await context.storageState()), savedAt: Date.now()});
+      // This command already owns a local login window and needs no HTTP relay.
+      service = await createService(config, {createBridge: async () => ({async revoke() {}, async close() {}})});
+      const state = await context.storageState();
+      const profile = await service.importCookies(args[0] || 'local', JSON.stringify({cookies: state.cookies}));
       console.log(`已保存 ${profile.playerName} 的会话。运行 node bin/piu.js fetch ${args[0] || 'local'}`);
-    } finally { rl.close(); await browser.close(); }
+    } finally { rl.close(); await service?.close(); await browser.close(); }
     return;
   }
   if (command === 'rank-login-local') {
@@ -81,10 +81,10 @@ async function main() {
         console.log(JSON.stringify(result, null, 2));
       }
       if (command === 'rank') {
-        const [owner = 'local', first, second, output = 'rank.png'] = args;
+        const [owner = 'local', first, second, output = 'rank.jpg'] = args;
         await save(output, await ranking.rank(owner, first, second));
       }
-      if (command === 'rank-preview') await save(args[2] || 'rank-current.png', await ranking.preview(args[0] || 'local', args[1]));
+      if (command === 'rank-preview') await save(args[2] || 'rank-current.jpg', await ranking.preview(args[0] || 'local', args[1]));
       if (command === 'rank-daemon') {
         ranking.start({keepAlive: true});
         console.log(`排行榜采集器已启动；下一次 01:00 GMT+8 对应 ${ranking.status().nextCaptureAt}。Ctrl+C 停止。`);
@@ -96,7 +96,7 @@ async function main() {
   if (command === 'fetch' || command === 'recent' || command === 'data') {
     const service = await createService(loadConfig());
     const method = {fetch:'best50',recent:'recent',data:'data'}[command];
-    try { await save(args[1] || ({fetch:'best50.png',recent:'recent.png',data:'play-data.png'}[command]),
+    try { await save(args[1] || ({fetch:'best50.jpg',recent:'recent.jpg',data:'play-data.jpg'}[command]),
       await service[method](args[0] || 'local', args.slice(2).join(' '))); }
     finally { await service.close(); }
     return;
@@ -105,7 +105,7 @@ async function main() {
     const service = await createService(loadConfig());
     try {
       const rows = await service.gameIds(args[0] || 'local');
-      console.log(JSON.stringify(rows.map(row => ({gameId: `${row.gameId}${row.tag}`, pumbility: row.pumbility, recordCount: row.recordCount, selected: row.selected})), null, 2));
+      console.log(JSON.stringify(rows.map(row => ({account: row.account, gameId: `${row.gameId}${row.tag}`, pumbility: row.pumbility, recordCount: row.recordCount, selected: row.selected, authExpired: Boolean(row.authExpired)})), null, 2));
     }
     finally { await service.close(); }
     return;
@@ -115,7 +115,7 @@ async function main() {
     const service = await createService(config);
     try {
       const ticket = await service.login(args[0] || 'local');
-      await save('login-qr.png', await QRCode.toBuffer(ticket.url, {width: 600}));
+      await save('login-qr.jpg', await renderLoginQr(ticket.url));
       console.log(`扫码打开独立官网登录窗口（非官方扫码授权）：\n${ticket.url}`);
       console.log('完成绑定后，停止此进程，再运行 node bin/piu.js fetch。Ctrl+C 停止。');
       await new Promise(resolve => { process.once('SIGINT', resolve); process.once('SIGTERM', resolve); });
@@ -125,21 +125,21 @@ async function main() {
   console.log([
     'PIU Best50 / 最近游玩 / 排行榜',
     '  npm run setup',
-    '  node bin/piu.js render profile.json out.png',
+    '  node bin/piu.js render profile.json out.jpg',
     '  node bin/piu.js parse pumbility.html profile.json',
     '  node bin/piu.js login-local [user]',
     '  node bin/piu.js serve [user]',
     '  node bin/piu.js list [user]',
-    '  node bin/piu.js fetch [user] [out.png] [名称#标签，如 ZANTING#9403]',
-    '  node bin/piu.js recent [user] [out.png] [名称#标签，如 ZANTING#9403]',
-    '  node bin/piu.js data [user] [out.png] [名称#标签，如 ZANTING#9403]',
+    '  node bin/piu.js fetch [user] [out.jpg] [名称#标签，如 ZANTING#9403]',
+    '  node bin/piu.js recent [user] [out.jpg] [名称#标签，如 ZANTING#9403]',
+    '  node bin/piu.js data [user] [out.jpg] [名称#标签，如 ZANTING#9403]',
     '  node bin/piu.js rank-login-local',
     '  node bin/piu.js rank-capture | rank-daemon | rank-dates | rank-audit | rank-prefetch',
     '  node bin/piu.js rank-follow owner SHAWN#1477 YINYBEST#3231 CHIPHANT#5633',
     '  node bin/piu.js rank-unfollow owner SHAWN#1477',
-    '  node bin/piu.js rank owner [YYYYMMDD YYYYMMDD] [out.png]',
-    '  node bin/piu.js rank-preview owner [YYYYMMDD] [out.png]',
-    '  未指定 B50 / recent / data 档案时生成首个档案；不接受纯名称、纯标签或 uid。',
+    '  node bin/piu.js rank owner [YYYYMMDD YYYYMMDD] [out.jpg]',
+    '  node bin/piu.js rank-preview owner [YYYYMMDD] [out.jpg]',
+    '  未指定 B50 / recent / data 档案时生成首个有效账号的首个档案；不接受纯名称、纯标签或 uid。',
   ].join('\n'));
 }
 main().catch(error => {

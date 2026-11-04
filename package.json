@@ -9,7 +9,7 @@
   },
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "demo": "node bin/piu.js render examples/demo.json best50-demo.png",
+    "demo": "node bin/piu.js render examples/demo.json best50-demo.jpg",
     "start": "node bin/piu.js serve",
     "setup": "node bin/piu.js setup",
     "browser:install": "playwright install chromium",

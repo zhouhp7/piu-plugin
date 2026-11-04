@@ -93,7 +93,7 @@ test('followed-list ranks use explicit followRank without inferring a nationalit
   assert.equal(formatRankRow({ ...data, current: { ...data.current, followRank: null } }).countryRank, '—');
 });
 
-test('comparison and missing-baseline renders are real readable PNGs and preserve input order', async () => {
+test('comparison and missing-baseline renders are scaled JPEGs and preserve input order', async () => {
   const rows = [
     { ...player, gameId: '中文长名字 / A PLAYER NAME THAT WRAPS WITHOUT HIDING THE ID', current: null },
     player,
@@ -101,10 +101,12 @@ test('comparison and missing-baseline renders are real readable PNGs and preserv
   ];
   const before = JSON.stringify(rows);
   const bytes = await renderRankComparison({ current: snapshot, previous, rows });
+  assert.equal(bytes.readUInt16BE(0),0xffd8);
   const image = await loadImage(bytes);
   assert.equal(Buffer.isBuffer(bytes), true);
   assert.equal(image.width, RANK_IMAGE_WIDTH);
-  assert.ok(image.height >= 580);
+  assert.equal(image.width,1200);
+  assert.ok(image.height >= Math.round(580*2/3));
   assert.equal(JSON.stringify(rows), before);
   const noHistory = await loadImage(await renderRankComparison({ current: { ...snapshot, kind: 'manual' }, previous: null, rows }));
   assert.equal(noHistory.width, RANK_IMAGE_WIDTH);

@@ -196,7 +196,7 @@ export async function createBridge({ host = '127.0.0.1', port = 17381, publicUrl
           active(entry);
           const state = await entry.context.storageState();
           active(entry);
-          await saveSession(entry.userKey, state);
+          await saveSession(entry.userKey, state, profile);
           if (onBound) await Promise.resolve().then(() => onBound(entry.userKey, profile)).catch(() => {});
         });
         await dispose(entry);
