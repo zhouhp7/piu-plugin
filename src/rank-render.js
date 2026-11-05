@@ -10,7 +10,7 @@ const RED = '#c53e49';
 const GREEN = '#168067';
 const DASH = '—';
 const MARGIN = 32;
-const TABLE_TOP = 226;
+const TABLE_TOP = 154;
 const HEADER_HEIGHT = 60;
 const COLUMNS = [
   { key: 'name', title: 'GAME ID', width: 340 },
@@ -20,7 +20,7 @@ const COLUMNS = [
   { key: 'worldDelta', title: '变动', width: 112 },
   { key: 'countryRank', title: '关注内名次*', width: 142 },
   { key: 'countryDelta', title: '变动', width: 112 },
-  { key: 'lastPlayedAt', title: '最后游玩时间（GMT+8）', width: 396 },
+  { key: 'lastPlayedAt', title: '最后游玩时间（GMT+8）', width: 320 },
 ];
 const TABLE_WIDTH = COLUMNS.reduce((sum, column) => sum + column.width, 0);
 const RANK_LAYOUT_WIDTH = TABLE_WIDTH + MARGIN * 2;
@@ -45,11 +45,6 @@ function scopedRank(entry, rankBasis) {
   return rankBasis === 'followed' && Object.hasOwn(entry, 'followRank') ? entry.followRank : entry.countryRank;
 }
 
-function dateLabel(value) {
-  const match = /^(\d{4})(\d{2})(\d{2})$/.exec(String(value ?? ''));
-  return match ? `${match[1]}-${match[2]}-${match[3]}` : String(value || '日期未知');
-}
-
 /** ISO snapshot timestamps are displayed in the fixed GMT+8 reporting zone. */
 export function formatRankCaptureTime(value) {
   if (!value) return '时间未知';
@@ -72,6 +67,11 @@ function delta(value, digits = 0) {
   const rounded = Number(value.toFixed(digits));
   if (!rounded) return { text: DASH, color: MUTED };
   return { text: `${rounded > 0 ? '+' : ''}${rounded.toFixed(digits)}`, color: rounded > 0 ? BLUE : RED };
+}
+
+function rankDelta(value) {
+  if (!isNumber(value) || !value) return { text: DASH, color: MUTED };
+  return { text: `${value > 0 ? '↑' : '↓'}${Math.abs(value)}`, color: value > 0 ? BLUE : RED };
 }
 
 function entryState(row) {
@@ -107,8 +107,8 @@ export function formatRankRow(row, hasPreviousSnapshot = true, rankBasis = 'foll
   if (!hasPreviousSnapshot) return result;
   if (current && previous) {
     result.scoreDelta = delta(isNumber(current.score) && isNumber(previous.score) ? current.score - previous.score : null, 2);
-    result.worldDelta = delta(isNumber(current.worldRank) && isNumber(previous.worldRank) ? previous.worldRank - current.worldRank : null);
-    result.countryDelta = delta(isNumber(currentRank) && isNumber(previousRank) ? previousRank - currentRank : null);
+    result.worldDelta = rankDelta(isNumber(current.worldRank) && isNumber(previous.worldRank) ? previous.worldRank - current.worldRank : null);
+    result.countryDelta = rankDelta(isNumber(currentRank) && isNumber(previousRank) ? previousRank - currentRank : null);
   } else if (current && !previous) {
     const marker = { text: entryState(row), color: GREEN };
     result.scoreDelta = marker;
@@ -156,9 +156,7 @@ function wrapName(ctx, name) {
 
 function sourceLabel(snapshot) {
   if (!snapshot) return '缺少历史快照';
-  const kind = ['scheduled', 'daily', 'schedule'].includes(snapshot.kind)
-    ? '每日 01:00 快照' : snapshot.kind === 'catchup' ? '补抓快照（非准点）' : snapshot.kind ? '即时快照' : '快照';
-  return `${dateLabel(snapshot.date)}（${kind}）`;
+  return `${formatRankCaptureTime(snapshot.capturedAt)}(GMT+8)`;
 }
 
 function rowOrder(left, right) {
@@ -195,10 +193,11 @@ export async function renderRankComparison({ title, current, previous = null, ro
     return { row, display, name: wrapName(measuring, display.identifier) };
   });
   const bodyHeight = prepared.length ? prepared.reduce((sum, item) => sum + item.name.height, 0) : 98;
+  const comparisonNote = previous ? '— 表示无变化或无可比较数据；离榜行的最后游玩时间取自前次快照。'
+    : '缺少历史快照：仅展示当前数据，所有变动留空；不会推算或补造过去成绩。';
   const footerLines = [
     basis.footnote,
-    '正数表示进步，负数表示下降；NEW 相对基准日新上榜 · BACK 再次上榜 · OUT 本次未进入前 1000。',
-    previous ? '— 表示无变化或无可比较数据；离榜行的最后游玩时间取自前次快照。' : '缺少历史快照：仅展示当前数据，所有变动留空；不会推算或补造过去成绩。',
+    `NEW 相对基准日新上榜 · BACK 再次上榜 · OUT 本次未进入前 1000。 ${comparisonNote}`,
   ];
   if (rawSourceTime) footerLines.push('* 带时区数据统一显示为 GMT+8；未标明时区的数据保留官网原文。');
   const tableBottom = TABLE_TOP + HEADER_HEIGHT + bodyHeight;
@@ -206,14 +205,12 @@ export async function renderRankComparison({ title, current, previous = null, ro
   const canvas = createCanvas(RANK_LAYOUT_WIDTH, height);
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#f2f5f8'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = '#ffffff'; ctx.fillRect(MARGIN, 24, TABLE_WIDTH, 180);
-  ctx.fillStyle = '#163b66'; ctx.fillRect(MARGIN, 24, 7, 180);
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(MARGIN, 24, TABLE_WIDTH, 108);
+  ctx.fillStyle = '#163b66'; ctx.fillRect(MARGIN, 24, 7, 108);
   text(ctx, title || 'PIU PHOENIX 2 · PUMBILITY 关注榜', MARGIN + 26, 61, TABLE_WIDTH - 400, 34, INK, 700, 'left');
   text(ctx, scopeLabel || '全球前 1000', RANK_LAYOUT_WIDTH - MARGIN - 22, 60, 350, 23, MUTED, 600, 'right');
-  text(ctx, `本次：${sourceLabel(current)}    对比：${sourceLabel(previous)}`, MARGIN + 26, 105, TABLE_WIDTH - 52, 24, INK, 400, 'left');
-  text(ctx, `实际采集：${formatRankCaptureTime(current.capturedAt)}（GMT+8）${previous ? `   /   前次：${formatRankCaptureTime(previous.capturedAt)}` : ''}`, MARGIN + 26, 143, TABLE_WIDTH - 52, 22, MUTED, 400, 'left');
   const sourceUpdated = current.sourceUpdatedAt ? `   ·   官网更新时间：${lastPlayedLabel(current.sourceUpdatedAt)}` : '';
-  text(ctx, `关注 ${rows.length} 位 · 本次上榜 ${rows.filter(row => row.current).length} 位${sourceUpdated}`, MARGIN + 26, 177, TABLE_WIDTH - 52, 21, MUTED, 400, 'left');
+  text(ctx, `本次：${sourceLabel(current)}    对比：${sourceLabel(previous)}    关注 ${rows.length} 位 · 本次上榜 ${rows.filter(row => row.current).length} 位${sourceUpdated}`, MARGIN + 26, 105, TABLE_WIDTH - 52, 24, INK, 400, 'left');
 
   ctx.fillStyle = '#183a60'; ctx.fillRect(MARGIN, TABLE_TOP, TABLE_WIDTH, HEADER_HEIGHT);
   let x = MARGIN;

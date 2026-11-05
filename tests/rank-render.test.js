@@ -11,16 +11,19 @@ const player = {
   previous: { score: 19009.20, worldRank: 72, countryRank: 1, lastPlayedAt: '2026-10-25 13:05:44' },
 };
 
-test('score and rank comparisons use the right directions and two score decimals', () => {
+test('rank changes use arrows while score changes keep signs and two decimals', () => {
   const row = formatRankRow(player);
   assert.equal(row.score, '19014.20');
   assert.equal(row.scoreDelta.text, '+5.00');
-  assert.equal(row.worldDelta.text, '-2');
+  assert.equal(row.worldDelta.text, '↓2');
   assert.equal(row.countryDelta.text, '—');
   const up = formatRankRow({ ...player, previous: { ...player.previous, worldRank: 87, countryRank: 3 } });
-  assert.equal(up.worldDelta.text, '+13');
-  assert.equal(up.countryDelta.text, '+2');
+  assert.equal(up.worldDelta.text, '↑13');
+  assert.equal(up.countryDelta.text, '↑2');
   assert.notEqual(up.worldDelta.color, row.worldDelta.color);
+  const sameRank = formatRankRow({ ...player, current: { ...player.current, score: 19004.20, worldRank: player.previous.worldRank } });
+  assert.equal(sameRank.scoreDelta.text, '-5.00');
+  assert.equal(sameRank.worldDelta.text, '—');
 });
 
 test('no historical snapshot produces no fabricated NEW markers or numeric changes', () => {
@@ -86,10 +89,10 @@ test('followed-list ranks use explicit followRank without inferring a nationalit
   const data = { ...player, current: { ...player.current, followRank: 2, countryRank: 30 }, previous: { ...player.previous, followRank: 5, countryRank: 21 } };
   const followed = formatRankRow(data);
   assert.equal(followed.countryRank, '2');
-  assert.equal(followed.countryDelta.text, '+3');
+  assert.equal(followed.countryDelta.text, '↑3');
   const country = formatRankRow(data, true, 'country');
   assert.equal(country.countryRank, '30');
-  assert.equal(country.countryDelta.text, '-9');
+  assert.equal(country.countryDelta.text, '↓9');
   assert.equal(formatRankRow({ ...data, current: { ...data.current, followRank: null } }).countryRank, '—');
 });
 
@@ -105,11 +108,14 @@ test('comparison and missing-baseline renders are scaled JPEGs and preserve inpu
   const image = await loadImage(bytes);
   assert.equal(Buffer.isBuffer(bytes), true);
   assert.equal(image.width, RANK_IMAGE_WIDTH);
-  assert.equal(image.width,1115);
-  assert.ok(image.height >= Math.round(580*2/3));
-  assert.equal(JSON.stringify(rows), before);
-  const noHistory = await loadImage(await renderRankComparison({ current: { ...snapshot, kind: 'manual' }, previous: null, rows }));
+  assert.equal(image.width,1064);
+  assert.ok(Number.isInteger(image.height) && image.height > 0);
+  const noHistoryBytes = await renderRankComparison({ current: { ...snapshot, kind: 'manual' }, previous: null, rows });
+  assert.equal(noHistoryBytes.readUInt16BE(0),0xffd8);
+  const noHistory = await loadImage(noHistoryBytes);
   assert.equal(noHistory.width, RANK_IMAGE_WIDTH);
+  assert.equal(noHistory.height, image.height);
+  assert.equal(JSON.stringify(rows), before);
 });
 
 test('empty follow lists render and bad comparison metadata fails explicitly', async () => {

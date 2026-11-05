@@ -42,14 +42,43 @@ test('explicit follow identities reject pure tags/names/uid and preserve duplica
  assert.throws(()=>parseFollowBatch('"ALPHA#1111'),{code:'RANK_ID'});
 });
 test('batch follow/unfollow is atomic, idempotent for known follows, and owner isolated',async t=>{
- const f=fixture(t);await f.service.capture();
- await assert.rejects(f.service.follow('owner','ALPHA#1111 MISSING#1111'),{code:'RANK_NOT_FOUND'});
+ const f=fixture(t,{login:false});
+ await assert.rejects(f.service.follow('owner','ALPHA#1111 INVALID_NAME#1111'),{code:'RANK_ID'});
  assert.deepEqual(f.service.listFollows('owner'),[]);
  assert.equal((await f.service.follow('owner','ALPHA#1111 BETA#1111')).added.length,2);
  assert.equal((await f.service.follow('owner','ALPHA#1111')).added.length,0);
  assert.equal(f.service.listFollows('other').length,0);
  assert.equal(f.service.unfollow('owner','BETA#1111').removed.length,1);
  assert.equal(f.service.listFollows('owner')[0].gameId,'ALPHA');
+});
+test('valid full IDs can be followed without snapshots, login or website requests',async t=>{
+ const f=fixture(t,{login:false,read:async()=>{throw new Error('follow must stay local');}});
+ const result=await f.service.follow('group:123','missing#1111 MISSING#1111 other#1111');
+ assert.deepEqual(result.added.map(row=>row.playerKey),['game:MISSING#1111','game:OTHER#1111']);
+ assert.deepEqual(result.follows.map(row=>row.gameId),['MISSING','OTHER']);
+ assert.equal((await f.service.follow('group:123','Missing#1111')).added.length,0);
+ assert.equal(f.calls(),0);assert.equal(f.saved.size,0);assert.deepEqual(f.store.listSnapshots(),[]);
+ assert.equal(f.service.unfollow('group:123','missing#1111').removed.length,1);
+ assert.throws(()=>f.service.unfollow('group:123','missing#1111'),error=>error.code==='RANK_NOT_FOUND'&&!error.message.includes('1000'));
+});
+test('follows absent from saved rankings are retained and match future captured entries',async t=>{
+ const f=fixture(t);await f.service.capture();
+ const result=await f.service.follow('owner','MISSING#1111');
+ assert.equal(result.added.length,1);assert.equal(f.calls(),1);
+ const preview=JSON.parse((await f.service.preview('owner')).toString());
+ assert.equal(preview.rows[0].gameId,'MISSING');assert.equal(preview.rows[0].current,null);
+ snapshot(f.store,'20261026');
+ snapshot(f.store,'20261102',[...entries,{playerKey:'game:MISSING#1111',gameId:'MISSING',tag:'#1111',worldRank:3,score:80}]);
+ const comparison=JSON.parse((await f.service.rank('owner')).toString());
+ assert.equal(comparison.rows[0].current.worldRank,3);assert.equal(comparison.rows[0].previous,null);
+});
+test('arbitrary follows still enforce the list limit atomically after deduplication',async t=>{
+ const f=fixture(t,{login:false});
+ const ids=Array.from({length:100},(_,i)=>`PLAYER${i}#0001`);
+ await f.service.follow('owner',ids.join(' '));
+ assert.equal((await f.service.follow('owner','player0#0001 PLAYER0#0001')).added.length,0);
+ await assert.rejects(f.service.follow('owner','EXTRA#0001'),{code:'RANK_FOLLOW_LIMIT'});
+ assert.equal(f.service.listFollows('owner').length,100);assert.equal(f.calls(),0);
 });
 test('rank uses exact default Mondays; missing history never falls back to current data',async t=>{
  const f=fixture(t);await f.service.capture();await f.service.follow('owner','ALPHA#1111');

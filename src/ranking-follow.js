@@ -44,10 +44,10 @@ export function resolveFollowBatch(entries, selectors) {
   for (const selector of selectors) {
     const canonical = canonicalPlayer(selector);
     const matches = entries.filter(row => canonicalPlayer(row) === canonical);
-    if (matches.length > 1) throw new PiuError('RANK_ID', '同一完整档案在列表中重复出现，不能通过大小写区分，请先更新排行榜数据。');
+    if (matches.length > 1) throw new PiuError('RANK_ID', '同一完整档案在列表中重复出现，不能通过大小写区分。');
     if (!matches.length) {
       const suggestions = entries.filter(row => row.tag === selector.tag).slice(0, 8).map(canonicalPlayer);
-      throw new PiuError('RANK_NOT_FOUND', `未找到 ${canonicalPlayer(selector)}。${suggestions.length ? `同标签候选：${suggestions.join('、')}。` : '该档案可能不在当前保存的全球前 1000 名中。'}`);
+      throw new PiuError('RANK_NOT_FOUND', `当前关注列表中没有 ${canonicalPlayer(selector)}。${suggestions.length ? `已关注的同标签档案：${suggestions.join('、')}。` : ''}`);
     }
     if (!resolved.some(row => canonicalPlayer(row) === canonical)) resolved.push(matches[0]);
   }

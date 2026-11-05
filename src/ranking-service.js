@@ -98,13 +98,6 @@ export function createRankingService(config, dependencies = {}) {
       lastReported = undefined;
     });
   }
-  async function ensureIndex() {
-    let latest = store.latestSnapshot();
-    if (latest) return latest;
-    if (captures.size) { await [...captures.values()][0]; latest = store.latestSnapshot(); }
-    if (!latest) { await capture(); latest = store.latestSnapshot(); }
-    return latest;
-  }
   async function prewarm({onlyIfEmpty = false} = {}) {
     open();
     const maxPages = config.jacketPrefetchPages ?? 3;
@@ -178,12 +171,13 @@ export function createRankingService(config, dependencies = {}) {
     async follow(owner, input) {
       open();
       const selectors = parseFollowBatch(input);
-      const latest = await ensureIndex();
-      const resolved = resolveFollowBatch(latest.entries, selectors);
+      const references = [...new Map(selectors.map(selector => {
+        const playerKey = `game:${canonicalPlayer(selector)}`;
+        return [playerKey, {playerKey, ...selector}];
+      })).values()];
       const previous = new Set(store.getFollows(owner).map(row => row.playerKey));
-      const combined = new Set([...previous, ...resolved.map(row => row.playerKey)]);
+      const combined = new Set([...previous, ...references.map(row => row.playerKey)]);
       if (combined.size > 100) throw new PiuError('RANK_FOLLOW_LIMIT', '每份关注列表最多关注 100 个档案。');
-      const references = resolved.map(({playerKey, gameId, tag, sourceId}) => ({playerKey, gameId, tag, ...(sourceId ? {sourceId} : {})}));
       return {added: references.filter(row => !previous.has(row.playerKey)), follows: store.follow(owner, references)};
     },
     unfollow(owner, input) {

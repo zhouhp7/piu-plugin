@@ -14,7 +14,7 @@ export const HELP_GROUPS = Object.freeze([
     {command:'#piu logout',description:'删除本人全部 PIU 账号绑定和成绩图片缓存。',aliases:'解绑 / 退出'},
   ]},
   {title:'关注与排行榜',items:[
-    {command:'#piu follow 名称#标签 ...',description:'批量添加关注；群内共享，所有群成员都可修改，私聊使用个人列表。'},
+    {command:'#piu follow 名称#标签 ...',description:'批量添加关注，无需已上榜或绑定账号；群内共享，所有成员都可修改，私聊使用个人列表。'},
     {command:'#piu unfollow 名称#标签 ...',description:'批量取消关注。follow / unfollow 不带参数时查看关注列表。'},
     {command:'#piu rank',description:'比较本周一 01:00 与上周一 01:00（GMT+8）的快照。'},
     {command:'#piu rank 日期1 日期2',description:'日期为 YYYYMMDD；前者为当前、后者为基准。'},
@@ -27,6 +27,7 @@ export const HELP_NOTES = Object.freeze([
   '查询示例：#piu b50 5；#piu recent ZANTING；#piu data #9403；#piu b50 ZANTING#9403。#piu default 5 与 #piu list 5 均可设置默认档案。',
   'list 仅读取本地档案缓存；需要更新官网档案信息时，私聊 #piu refresh。follow / unfollow 仍须使用完整的 名称#四位标签。',
   '批量关注示例：#piu follow SHAWN#1477 YINYBEST#3231 CHIPHANT#5633。',
+  '符合规则的完整档案标识均可关注；添加时仅读写本地列表，无需账号、排行榜快照或连接官网。排行榜成绩和名次仅来自已采集的前 1000 名，未上榜时该次数据不可用。',
   '所有档案名称仅限 1–12 位英文字母或数字，不含空格或符号；参数大小写不敏感，统一显示大写。',
   '日期示例：#piu rank 20261103 20261102。缺失的历史快照不能比较，也不会补造。',
   '机器人在线且排行榜专用会话有效时，每天 GMT+8 01:00 保存全球前 1000 名；按配置保活，失效后由主人重新登录。普通个人登录不会授权全局排行榜采集。',
