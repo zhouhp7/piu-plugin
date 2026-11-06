@@ -17,21 +17,30 @@ function timers() {
  return {rows,setTimeout:(fn,delay)=>make('timeout',fn,delay),setInterval:(fn,delay)=>make('interval',fn,delay),
   clearTimeout:handle=>{if(handle)handle.cleared=true;},clearInterval:handle=>{if(handle)handle.cleared=true;}};
 }
-function fixture(t,{time='2026-11-03T00:30:00+08:00',read,login=true}={}) {
- let current=new Date(time),calls=0;
+function fixture(t,{time='2026-11-03T00:30:00+08:00',read,save,login=true,config={}}={}) {
+ let current=new Date(time),calls=0,saves=0;
  const store=new RankingStore({filename:':memory:',minEntries:2});
  const saved=new Map(login?[['leaderboard-reader',{state,savedAt:current.toISOString()}]]:[]);
  const clock=timers(),warnings=[];
- const service=createRankingService({dataDir:'/unused',rankEnabled:true,rankKeepAliveMs:0,captureRetries:0},{
-  store,vault:{async load(key){return saved.get(key)??null;},async save(key,value){saved.set(key,value);}},
+ const service=createRankingService({dataDir:'/unused',rankEnabled:true,rankKeepAliveMs:0,captureRetries:0,...config},{
+  store,vault:{async load(key){return saved.get(key)??null;},async save(key,value){saves++;await save?.(key,value);saved.set(key,value);}},
   reader:{async fetch(input){calls++;const extra=read?await read(input):{};return{entries,state:input,capturedAt:current.toISOString(),audit:{count:2},...extra};},async close(){}},
   now:()=>new Date(current),timers:clock,logger:{warn:message=>warnings.push(message)},
   render:async input=>Buffer.from(JSON.stringify(input)),
  });
  t.after(()=>service.close());
- return{service,store,clock,warnings,saved,calls:()=>calls,setTime:value=>{current=new Date(value);}};
+ return{service,store,clock,warnings,saved,calls:()=>calls,saves:()=>saves,setTime:value=>{current=new Date(value);}};
 }
 function snapshot(store,date,rows=entries){store.saveSnapshot({date,kind:'scheduled',capturedAt:zoned01(date),scheduledAt:zoned01(date),entries:rows});}
+const settle=()=>new Promise(resolve=>setImmediate(resolve));
+function activeTimer(f){
+ const active=f.clock.rows.filter(row=>row.type==='timeout'&&!row.cleared&&!row.fired);
+ assert.equal(active.length,1,'only one capture timer should be active');
+ return active[0];
+}
+async function fireTimer(f,time){
+ const timer=activeTimer(f);timer.fired=true;f.setTime(time);await timer.fn();
+}
 
 test('explicit follow identities reject pure tags/names/uid and preserve duplicate-tag players',()=>{
  for(const text of ['#1111','ALPHA','uid1'])assert.throws(()=>parseFollowBatch(text),{code:'RANK_ID'});
@@ -107,6 +116,94 @@ test('scheduler targets next GMT+8 01:00 independent of host timezone, and catch
  await f.service.runDue();assert.equal(f.calls(),1);
  assert.equal(f.store.getSnapshot('20261102'),null);
 });
+test('daily failures retry every 30 minutes until success, then resume the next daily slot',async t=>{
+ let failures=2;
+ const f=fixture(t,{read:async()=>{if(failures-->0)throw new PiuError('RANK_NETWORK','offline');}});
+ f.service.start();await settle();
+ await fireTimer(f,'2026-11-03T01:00:00+08:00');
+ assert.equal(activeTimer(f).delay,30*60_000);assert.equal(activeTimer(f).unreferenced,true);
+ assert.equal(f.service.status().nextCaptureAt,'2026-11-02T17:30:00.000Z');
+ await fireTimer(f,'2026-11-03T01:30:00+08:00');
+ assert.equal(activeTimer(f).delay,30*60_000);assert.equal(f.calls(),2);
+ assert.equal(f.store.getSnapshot('20261103'),null);
+ await fireTimer(f,'2026-11-03T02:00:00+08:00');
+ const saved=f.store.getSnapshot('20261103');
+ assert.equal(saved.kind,'catchup');assert.equal(saved.capturedAt,'2026-11-02T18:00:00.000Z');
+ assert.equal(saved.scheduledAt,zoned01('20261103'));assert.equal(f.calls(),3);
+ assert.equal(f.service.status().nextCaptureAt,zoned01('20261104'));
+ assert.equal(activeTimer(f).delay,23*60*60_000);
+ await fireTimer(f,'2026-11-04T01:00:00+08:00');
+ assert.equal(f.store.getSnapshot('20261104').kind,'scheduled');assert.equal(f.calls(),4);
+});
+test('database and session save failures both trigger the 30-minute catchup',async t=>{
+ for(const failure of ['database','session']){
+  let failSave=failure==='session';
+  const f=fixture(t,{save:async()=>{if(failSave)throw new Error('write failed');}});
+  const before=structuredClone(f.saved.get('leaderboard-reader'));
+  f.service.start();await settle();
+  if(failure==='database')f.store.db.exec('PRAGMA query_only = ON');
+  await fireTimer(f,'2026-11-03T01:00:00+08:00');
+  assert.equal(activeTimer(f).delay,30*60_000);
+  assert.equal(f.store.getSnapshot('20261103'),null);
+  assert.deepEqual(f.saved.get('leaderboard-reader'),before);
+  f.store.db.exec('PRAGMA query_only = OFF');failSave=false;
+  await fireTimer(f,'2026-11-03T01:30:00+08:00');
+  assert.equal(f.store.getSnapshot('20261103').kind,'catchup');
+  assert.equal(f.service.status().nextCaptureAt,zoned01('20261104'));
+ }
+});
+test('failed startup catchup retries, including after ranking authorization becomes available',async t=>{
+ const f=fixture(t,{time:'2026-11-03T02:00:00+08:00',login:false});
+ f.service.start({keepAlive:true});await settle();
+ assert.equal(f.calls(),0);assert.equal(activeTimer(f).delay,30*60_000);
+ assert.equal(activeTimer(f).unreferenced,undefined);
+ const timer=activeTimer(f);f.service.start();assert.equal(activeTimer(f),timer);
+ f.saved.set('leaderboard-reader',{state,savedAt:'2026-11-02T18:05:00.000Z'});
+ await fireTimer(f,'2026-11-03T02:30:00+08:00');
+ assert.equal(f.store.getSnapshot('20261103').kind,'catchup');assert.equal(f.calls(),1);
+ assert.equal(f.service.status().nextCaptureAt,zoned01('20261104'));
+});
+test('late failures end at the GMT+8 day boundary and next year starts with its own daily capture',async t=>{
+ let fail=true;
+ const f=fixture(t,{time:'2026-12-31T23:45:00+08:00',read:async()=>{if(fail)throw new Error('offline');}});
+ f.service.start();await settle();
+ assert.equal(activeTimer(f).delay,75*60_000);
+ assert.equal(f.service.status().nextCaptureAt,zoned01('20270101'));
+ fail=false;await fireTimer(f,'2027-01-01T01:00:00+08:00');
+ assert.equal(f.store.getSnapshot('20261231'),null);
+ assert.equal(f.store.getSnapshot('20270101').kind,'scheduled');
+});
+test('a capture crossing midnight schedules the new daily slot without backdating or a midnight retry',async t=>{
+ const f=fixture(t,{time:'2026-11-03T23:30:00+08:00',read:async()=>{f.setTime('2026-11-04T00:05:00+08:00');}});
+ f.service.start();await settle();
+ assert.equal(f.store.listSnapshots().length,0);
+ assert.equal(f.service.status().nextCaptureAt,zoned01('20261104'));
+ assert.equal(activeTimer(f).delay,55*60_000);
+});
+test('a successful catchup from another request prevents the pending retry from fetching again',async t=>{
+ let fail=true;
+ const f=fixture(t,{read:async()=>{if(fail)throw new Error('offline');}});
+ f.service.start();await settle();await fireTimer(f,'2026-11-03T01:00:00+08:00');
+ fail=false;f.setTime('2026-11-03T01:10:00+08:00');await f.service.runDue();
+ assert.equal(f.calls(),2);
+ await fireTimer(f,'2026-11-03T01:30:00+08:00');
+ assert.equal(f.calls(),2);assert.equal(f.store.listSnapshots().length,1);
+ assert.equal(f.service.status().nextCaptureAt,zoned01('20261104'));
+});
+test('closing cancels a pending retry and disabled scheduling never creates one',async t=>{
+ const f=fixture(t,{time:'2026-11-03T02:00:00+08:00',read:async()=>{throw new Error('offline');}});
+ f.service.start();await settle();const retry=activeTimer(f);
+ assert.equal(retry.delay,30*60_000);await f.service.close();assert.equal(retry.cleared,true);
+ const disabled=fixture(t,{config:{rankEnabled:false}});disabled.service.start();await settle();
+ assert.equal(disabled.clock.rows.length,0);assert.equal(disabled.calls(),0);
+});
+test('closing during a failed capture does not rearm its retry timer',async t=>{
+ let release,started;
+ const waiting=new Promise(resolve=>{release=resolve;}),ready=new Promise(resolve=>{started=resolve;});
+ const f=fixture(t,{time:'2026-11-03T02:00:00+08:00',read:async()=>{started();await waiting;throw new Error('offline');}});
+ f.service.start();await ready;const closing=f.service.close();release();await closing;await settle();
+ assert.ok(f.clock.rows.every(row=>row.cleared));
+});
 test('keepalive refreshes authorized state without creating ranking snapshots',async t=>{
  const f=fixture(t);await f.service.keepAlive();assert.equal(f.calls(),1);assert.equal(f.store.listSnapshots().length,0);
  const noLogin=fixture(t,{login:false});await assert.rejects(noLogin.service.capture(),{code:'RANK_AUTH'});
@@ -156,6 +253,65 @@ test('rejected ranking Cookie imports preserve the previous binding and snapshot
   await assert.rejects(f.service.importCookies('malformed'),{code:'COOKIE_FORMAT'});
   assert.equal(f.calls(),calls);
  }
+});
+
+test('snapshot write failures preserve ranking authorization and allow a later import retry',async t=>{
+ const f=fixture(t);await f.service.capture();
+ const before=structuredClone(f.saved.get('leaderboard-reader')),snapshots=f.store.listSnapshots(),saves=f.saves();
+ f.setTime('2026-11-03T00:31:00+08:00');
+ f.store.db.exec('PRAGMA query_only = ON');
+ await assert.rejects(f.service.importCookies('sid=replacement'),{code:'RANK_COOKIE_IMPORT_FAILED'});
+ assert.deepEqual(f.saved.get('leaderboard-reader'),before);
+ assert.deepEqual(f.store.listSnapshots(),snapshots);assert.equal(f.saves(),saves);
+ f.store.db.exec('PRAGMA query_only = OFF');
+ await f.service.importCookies('sid=replacement');
+ assert.equal(f.saved.get('leaderboard-reader').state.cookies[0].value,'replacement');
+ assert.equal(f.store.listSnapshots().length,2);
+});
+
+test('snapshot validation failures never replace ranking authorization',async t=>{
+ let invalid=false;
+ const f=fixture(t,{read:async()=>invalid?{entries:[]}:undefined});await f.service.capture();
+ const before=structuredClone(f.saved.get('leaderboard-reader')),snapshots=f.store.listSnapshots(),saves=f.saves();invalid=true;
+ await assert.rejects(f.service.importCookies('sid=replacement'),{code:'RANK_SNAPSHOT'});
+ assert.deepEqual(f.saved.get('leaderboard-reader'),before);
+ assert.deepEqual(f.store.listSnapshots(),snapshots);assert.equal(f.saves(),saves);
+});
+
+test('session save failures roll back only new snapshots and preserve idempotent history',async t=>{
+ let rejectSave=false;
+ const f=fixture(t,{save:async()=>{if(rejectSave)throw new Error('sid=secret-never-echo');}});
+ await f.service.capture();
+ const before=structuredClone(f.saved.get('leaderboard-reader')),snapshots=f.store.listSnapshots(),original=f.store.getSnapshot('20261103');
+ rejectSave=true;
+ for(const time of ['2026-11-03T00:31:00+08:00','2026-11-03T00:30:00+08:00']){
+  f.setTime(time);
+  await assert.rejects(f.service.importCookies('sid=replacement'),error=>error.code==='RANK_COOKIE_IMPORT_FAILED'&&!error.message.includes('secret-never-echo'));
+  assert.deepEqual(f.saved.get('leaderboard-reader'),before);
+  assert.deepEqual(f.store.listSnapshots(),snapshots);
+  assert.deepEqual(f.store.getSnapshot('20261103'),original);
+ }
+});
+
+test('an initial authorization save failure leaves no session or snapshot',async t=>{
+ const f=fixture(t,{login:false,save:async()=>{throw new Error('write failed');}});
+ await assert.rejects(f.service.importCookies('sid=replacement'),{code:'RANK_COOKIE_IMPORT_FAILED'});
+ assert.equal(f.saved.size,0);assert.deepEqual(f.store.listSnapshots(),[]);
+});
+
+test('follow writes remain available during a pending session save and survive snapshot rollback',async t=>{
+ let reject;
+ const waiting=new Promise((_resolve,fail)=>{reject=fail;});let started;
+ const ready=new Promise(resolve=>{started=resolve;});
+ const f=fixture(t,{save:async()=>{started();await waiting;}});
+ const importing=f.service.importCookies('sid=replacement');
+ const failed=assert.rejects(importing,{code:'RANK_COOKIE_IMPORT_FAILED'});
+ await ready;
+ await f.service.follow('owner','ALPHA#1111 BETA#1111');
+ f.service.unfollow('owner','BETA#1111');
+ reject(new Error('write failed'));await failed;
+ assert.deepEqual(f.store.listSnapshots(),[]);
+ assert.deepEqual(f.service.listFollows('owner').map(row=>row.gameId),['ALPHA']);
 });
 
 test('ranking Cookie import queues behind capture and keepalive uses the new session',async t=>{
