@@ -151,6 +151,11 @@ export class RankingStore {
   }
 
   saveSnapshot(input) {
+    return this.saveSnapshotWithRollback(input).metadata;
+  }
+
+  /** Commit before asynchronous session I/O; compensate only this call's new row on failure. */
+  saveSnapshotWithRollback(input) {
     const value = normalizeSnapshot(input, this.minEntries);
     const audit = json(value.audit, 'audit');
     const rows = value.entries.map(entry => ({entry, serialized: json(entry, '排行榜记录')}));
@@ -164,7 +169,7 @@ export class RankingStore {
           throw invalid('同一抓取时间已有不同内容，不能覆盖历史快照。');
         }
         this.db.exec('COMMIT');
-        return metadata(existing);
+        return {metadata: metadata(existing), rollback() {}};
       }
       const result = this.db.prepare(`INSERT INTO ranking_snapshots
         (date,scheduled_at,captured_at,source_updated_at,kind,entry_count,audit_json)
@@ -172,8 +177,14 @@ export class RankingStore {
       const id = Number(result.lastInsertRowid);
       const insert = this.db.prepare('INSERT INTO ranking_entries (snapshot_id,player_key,row_ordinal,world_rank,entry_json) VALUES (?,?,?,?,?)');
       for (const [index, {entry, serialized}] of rows.entries()) insert.run(id, entry.playerKey, index + 1, entry.worldRank, serialized);
+      const saved = metadata(this.db.prepare('SELECT * FROM ranking_snapshots WHERE id = ?').get(id));
       this.db.exec('COMMIT');
-      return metadata(this.db.prepare('SELECT * FROM ranking_snapshots WHERE id = ?').get(id));
+      let rolledBack = false;
+      return {metadata: saved, rollback: () => {
+        if (rolledBack) return;
+        this.db.prepare('DELETE FROM ranking_snapshots WHERE id = ?').run(id);
+        rolledBack = true;
+      }};
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
 

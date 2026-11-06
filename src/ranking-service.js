@@ -10,6 +10,8 @@ import {getJacketCache} from './jacket-cache.js';
 import {prefetchJackets} from './jacket-prefetch.js';
 import {parseCookieState} from './cookies.js';
 
+const CATCHUP_INTERVAL_MS = 30 * 60_000;
+
 export function createRankingService(config, dependencies = {}) {
   const store = dependencies.store ?? new RankingStore({filename: path.join(config.dataDir, 'rankings.sqlite')});
   const reader = dependencies.reader ?? new RankingReader(config);
@@ -20,7 +22,7 @@ export function createRankingService(config, dependencies = {}) {
   const logger = dependencies.logger ?? globalThis.logger ?? console;
   const captures = new Map();
   let networkTail = Promise.resolve(), started = false, closing = false;
-  let dailyTimer, heartbeatTimer, lastReported;
+  let dailyTimer, heartbeatTimer, lastReported, nextCaptureAt;
 
   function open() { if (closing) throw new PiuError('RANK_CLOSED', '排行榜服务已关闭。'); }
   const report = error => {
@@ -42,11 +44,16 @@ export function createRankingService(config, dependencies = {}) {
   async function saveReadResult(result, saved, kind, date) {
     const capturedAt = result.capturedAt ?? now().toISOString();
     if (shanghaiDate(capturedAt) !== date) throw new PiuError('RANK_DATE', '采集跨越了 GMT+8 日期边界，未将当前数据记入过去日期。');
-    if (vault && saved) await vault.save('leaderboard-reader', {...saved, state: rankingSessionState(result.state), lastUsedAt: now().toISOString()});
-    const meta = store.saveSnapshot({date, kind, capturedAt, scheduledAt: kind === 'manual' ? null : zoned01(date),
+    const write = store.saveSnapshotWithRollback({date, kind, capturedAt, scheduledAt: kind === 'manual' ? null : zoned01(date),
       sourceUpdatedAt: result.sourceUpdatedAt ?? null, entries: result.entries, audit: result.audit ?? null});
+    try {
+      if (vault && saved) await vault.save('leaderboard-reader', {...saved, state: rankingSessionState(result.state), lastUsedAt: now().toISOString()});
+    } catch (error) {
+      write.rollback();
+      throw error;
+    }
     lastReported = undefined;
-    return meta;
+    return write.metadata;
   }
   async function capture({kind = 'manual', date = shanghaiDate(now())} = {}) {
     open(); parseDate(date);
@@ -78,13 +85,22 @@ export function createRankingService(config, dependencies = {}) {
     if (existing && existing.kind !== 'manual') return existing;
     return capture({kind, date});
   }
-  function schedule({keepAlive = false} = {}) {
+  function schedule({keepAlive = false, retryDate} = {}) {
     if (closing || !started) return;
-    const target = nextDaily01(now());
+    const current = now();
+    const retryAt = new Date(current.getTime() + CATCHUP_INTERVAL_MS);
+    // Retry only within the failed capture's GMT+8 day; never backfill yesterday.
+    const retrying = retryDate === shanghaiDate(current) && shanghaiDate(retryAt) === retryDate;
+    const target = retrying ? retryAt : nextDaily01(current);
+    timers.clearTimeout(dailyTimer);
+    nextCaptureAt = target.toISOString();
     dailyTimer = timers.setTimeout(async () => {
-      try { await runDue('scheduled'); } catch (error) { report(error); }
-      finally { schedule({keepAlive}); }
-    }, Math.max(1, target.getTime() - now().getTime()));
+      const date = shanghaiDate(now());
+      let failedDate;
+      try { await runDue(retrying ? 'catchup' : 'scheduled'); }
+      catch (error) { failedDate = date; report(error); }
+      finally { schedule({keepAlive, retryDate: failedDate}); }
+    }, Math.max(1, target.getTime() - current.getTime()));
     if (!keepAlive) dailyTimer?.unref?.();
   }
   async function keepAlive() {
@@ -120,7 +136,6 @@ export function createRankingService(config, dependencies = {}) {
       if (!filtered.cookies.length) throw new PiuError('RANK_AUTH', '未取得官方登录会话，请重新登录。');
       const result = await reader.fetch(filtered);
       const saved = {state: rankingSessionState(result.state), savedAt: now().toISOString()};
-      await vault.save('leaderboard-reader', saved);
       return saveReadResult(result, saved, 'manual', shanghaiDate(result.capturedAt ?? now()));
     });
     if (config.jacketPrefetchPages > 0) void prewarm({onlyIfEmpty: true}).catch(report);
@@ -155,10 +170,14 @@ export function createRankingService(config, dependencies = {}) {
         if (!keepProcessAlive) heartbeatTimer?.unref?.();
       }
       // Recover today's missed slot honestly, retaining the actual later capture time.
-      void runDue().catch(report);
+      const date = shanghaiDate(now());
+      void runDue().catch(error => {
+        report(error);
+        schedule({keepAlive: keepProcessAlive, retryDate: date});
+      });
     },
     status() {
-      return {started, nextCaptureAt: config.rankEnabled === false ? null : nextDaily01(now()).toISOString(),
+      return {started, nextCaptureAt: config.rankEnabled === false ? null : nextCaptureAt ?? nextDaily01(now()).toISOString(),
         snapshots: store.listSnapshots(), keyConfigured: Boolean(vault)};
     },
     latestAudit() {
@@ -210,6 +229,7 @@ export function createRankingService(config, dependencies = {}) {
       if (closing) return;
       closing = true; started = false;
       timers.clearTimeout(dailyTimer); timers.clearInterval(heartbeatTimer);
+      nextCaptureAt = undefined;
       await networkTail.catch(() => {});
       await reader.close();
       store.close();

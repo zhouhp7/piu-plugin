@@ -87,7 +87,7 @@ async function main() {
       if (command === 'rank-preview') await save(args[2] || 'rank-current.jpg', await ranking.preview(args[0] || 'local', args[1]));
       if (command === 'rank-daemon') {
         ranking.start({keepAlive: true});
-        console.log(`排行榜采集器已启动；下一次 01:00 GMT+8 对应 ${ranking.status().nextCaptureAt}。Ctrl+C 停止。`);
+        console.log(`排行榜采集器已启动；每天 GMT+8 01:00 采集，失败后当天每 30 分钟补采至成功。下一次计划：${ranking.status().nextCaptureAt}。Ctrl+C 停止。`);
         await new Promise(resolve => {process.once('SIGINT', resolve); process.once('SIGTERM', resolve);});
       }
     } finally { await ranking.close(); }
