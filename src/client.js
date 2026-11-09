@@ -48,7 +48,7 @@ export async function readProfile(page, {paginate = true} = {}) {
   try { response = await page.goto(PUMBILITY_URL, {waitUntil: 'domcontentloaded'}); }
   catch { throw new PiuError('NETWORK', '无法访问 PIU 官网，请稍后重试。'); }
   if (!page.url().startsWith(PUMBILITY_URL)) throw new PiuError('AUTH_REQUIRED', '尚未登录成功，请在登录窗口完成登录后重试。');
-  if (!response?.ok()) throw new PiuError('NETWORK', 'PIU 官网返回异常状态，请稍后重试。');
+  if (response && !response.ok() && response.status() !== 304) throw new PiuError('NETWORK', 'PIU 官网返回异常状态，请稍后重试。');
   const profile = parsePumbility(await page.content());
   if (paginate && profile.records.length < 50 && profile.lastPage > 1) {
     const seen = new Set(profile.records.map(r => `${r.title}\0${r.mode}\0${r.level}`));
@@ -73,9 +73,25 @@ export async function readAccount(page, {paginate = false} = {}) {
   const profile = await readProfile(page, {paginate});
   let gameIds = parseGameIds(await page.content());
   if (!gameIds.length) {
-    const response = await page.goto(`${PIU_ORIGIN}/my_page/game_id_information.php`, {waitUntil: 'domcontentloaded'});
-    if (!response?.ok() || !page.url().startsWith(`${PIU_ORIGIN}/my_page/`)) throw new PiuError('AUTH_REQUIRED', '未能读取账号档案，请重新登录。');
-    gameIds = parseGameIds(await page.content());
+    try {
+      const response = await page.goto(`${PIU_ORIGIN}/my_page/game_id_information.php`, {waitUntil: 'domcontentloaded'});
+      if (response && (response.ok() || response.status() === 304) && page.url().startsWith(`${PIU_ORIGIN}/my_page/`)) {
+        gameIds = parseGameIds(await page.content());
+      }
+    } catch {}
+  }
+  if (!gameIds.length && profile.playerName && profile.playerName !== 'PIU Player') {
+    const match = /^([^#]+?)\s*#\s*(\d{4})$/.exec(profile.playerName);
+    if (match) {
+      gameIds = [{
+        id: '1',
+        uid: 'uid1',
+        playerName: profile.playerName,
+        gameId: match[1].trim(),
+        tag: `#${match[2]}`,
+        selected: true
+      }];
+    }
   }
   if (!gameIds.length) throw new PiuError('PAGE_CHANGED', '未能识别账号的档案列表，未保存此次绑定。');
   return {...profile, gameIds};
@@ -113,9 +129,24 @@ async function withAccount(browserManager, state, action) {
     const initialProfile = await readProfile(page);
     let gameIds = parseGameIds(await page.content());
     if (!gameIds.length) {
-      await page.goto(`${PIU_ORIGIN}/my_page/game_id_information.php`, {waitUntil: 'domcontentloaded'});
-      gameIds = parseGameIds(await page.content());
-      await readProfile(page);
+      try {
+        await page.goto(`${PIU_ORIGIN}/my_page/game_id_information.php`, {waitUntil: 'domcontentloaded'});
+        gameIds = parseGameIds(await page.content());
+        await readProfile(page);
+      } catch {}
+    }
+    if (!gameIds.length && initialProfile.playerName && initialProfile.playerName !== 'PIU Player') {
+      const match = /^([^#]+?)\s*#\s*(\d{4})$/.exec(initialProfile.playerName);
+      if (match) {
+        gameIds = [{
+          id: '1',
+          uid: 'uid1',
+          playerName: initialProfile.playerName,
+          gameId: match[1].trim(),
+          tag: `#${match[2]}`,
+          selected: true
+        }];
+      }
     }
     const selected = gameIds.filter(item => item.selected);
     if (gameIds.length && selected.length !== 1) {

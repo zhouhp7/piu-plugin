@@ -49,6 +49,20 @@ export function parseGameIds(html) {
     gameIds.push({id, uid: `uid${gameIds.length + 1}`, playerName, gameId, tag: `#${tag}`,
       selected: input.is('[checked]') || playerName === currentName});
   });
+  if (!gameIds.length) {
+    const rawSingle = currentName || clean($('.subProfile_wrap .profile_name .t2, .profile_name .t2').first().text()).replace(/\s*#\s*/, '#');
+    const singleMatch = /^([^#]+?)\s*#\s*(\d{4})$/.exec(rawSingle);
+    if (singleMatch) {
+      gameIds.push({
+        id: '1',
+        uid: 'uid1',
+        playerName: `${singleMatch[1].trim()}#${singleMatch[2]}`,
+        gameId: singleMatch[1].trim(),
+        tag: `#${singleMatch[2]}`,
+        selected: true
+      });
+    }
+  }
   return gameIds;
 }
 

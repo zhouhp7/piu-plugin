@@ -179,7 +179,7 @@ export async function createService(config, dependencies = {}) {
   };
   const bridge = await (dependencies.createBridge ?? createBridge)({host: config.host, port: config.port, publicUrl: config.publicUrl,
     ttlMs: config.ttlMs, maxSessions: config.maxSessions,
-    createLogin: () => browser.createLogin(),
+    createLogin: (userKey, options) => browser.createLogin(options),
     validateLogin: page => validateLogin(page, {paginate: false}),
     saveSession: async (userKey, state, profile) => {
       beginMutation(userKey);

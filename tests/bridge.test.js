@@ -151,3 +151,23 @@ test('typing requires a focused editable element and screenshot work is bounded'
   release();
   await Promise.all([first, second, third]);
 });
+
+test('direct-login validates credentials, saves session and consumes ticket', async t => {
+  let boundUser = null;
+  const f = await fixture(t, {
+    validateLogin: async () => ({ playerName: 'TEST#1234', pumbility: 1000 }),
+    onBound: (userKey, profile) => { boundUser = userKey; }
+  });
+  f.page.fill = async () => {};
+  f.page.click = async () => {};
+  f.page.url = () => 'https://www.piugame.com/my_page/pumbility.php';
+  const ticket = await f.bridge.createTicket('user123');
+  const token = new URLSearchParams(new URL(ticket.url).hash.slice(1)).get('token');
+  const result = await f.request('direct-login', { token, email: 'test@example.com', password: 'secret' }, {}, 'http://localhost');
+  assert.equal(result.response.status, 200);
+  assert.equal(result.data.ok, true);
+  assert.equal(result.data.playerName, 'TEST#1234');
+  assert.equal(f.saves(), 1);
+  assert.equal(f.closes(), 1);
+  assert.equal(boundUser, 'user123');
+});

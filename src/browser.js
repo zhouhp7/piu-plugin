@@ -44,11 +44,29 @@ export class BrowserManager {
     });
     return context;
   }
-  async createLogin() {
-    const context = await this.context();
+  async createLogin(options = {}) {
+    const browser = await this.browser();
+    const viewport = options?.viewport || { width: 414, height: 850 };
+    const context = await browser.newContext({
+      viewport,
+      locale: 'en-US', acceptDownloads: false, serviceWorkers: 'block'
+    });
+    context.setDefaultTimeout(15000);
+    context.setDefaultNavigationTimeout(35000);
+    await context.route('**/*', async route => {
+      const value = route.request().url();
+      if (isOfficialUrl(value) || /^(data:|blob:)/.test(value)) return route.continue();
+      return route.abort('blockedbyclient');
+    });
+    await context.routeWebSocket('**/*', route => route.close());
+    context.on('page', page => {
+      page.on('dialog', dialog => dialog.dismiss().catch(() => {}));
+      page.on('download', download => download.cancel().catch(() => {}));
+      if (context.pages().length > 1) page.close().catch(() => {});
+    });
     try {
       const page = await context.newPage();
-      await page.goto(PUMBILITY_URL, {waitUntil: 'domcontentloaded'});
+      await page.goto(PIU_ORIGIN + '/login.php?login_url=%2Fmy_page%2Fpumbility.php', { waitUntil: 'domcontentloaded', timeout: 25000 });
       return {context, page};
     } catch (error) {
       if (globalThis.logger?.error) globalThis.logger.error(`[PIU] 打开官网登录页失败: ${error?.stack || error?.message || error}`);
