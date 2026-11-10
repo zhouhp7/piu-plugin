@@ -3,7 +3,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { loadConfig, loadRankingConfig, ROOT } from '../src/config.js';
+import { loadConfig, loadRankingConfig, ROOT, DEF_CONFIG_PATH, USER_CONFIG_PATH } from '../src/config.js';
 import { createRankingService } from '../src/ranking-service.js';
 import { renderBest50 } from '../src/render.js';
 import { parsePumbility } from '../src/parser.js';
@@ -19,10 +19,25 @@ async function save(file, data) {
 }
 async function main() {
   if (command === 'setup') {
-    let template = await readFile(path.join(ROOT, '.env.example'), 'utf8');
-    template = template.replace('REPLACE_WITH_64_HEX_CHARACTERS', randomBytes(32).toString('hex'));
-    await writeFile(path.join(ROOT, '.env'), template, {flag: 'wx', mode: 0o600});
-    console.log('已创建 .env。部署前将 PIU_PUBLIC_URL 改为自己的 HTTPS 域名。');
+    const key = randomBytes(32).toString('hex');
+    let yamlTemplate = await readFile(DEF_CONFIG_PATH, 'utf8');
+    yamlTemplate = yamlTemplate.replace('sessionKey: ""', `sessionKey: "${key}"`);
+    await mkdir(path.dirname(USER_CONFIG_PATH), { recursive: true });
+    let created = true;
+    await writeFile(USER_CONFIG_PATH, yamlTemplate, { flag: 'wx', mode: 0o600 }).catch(err => {
+      if (err.code === 'EEXIST') {
+        created = false;
+        console.log('config/config.yaml 已存在，保留现有配置。');
+      } else {
+        throw err;
+      }
+    });
+    if (created) {
+      console.log('已创建 config/config.yaml。密钥 sessionKey 已自动生成。部署前将 publicUrl 改为自己的 HTTPS 域名。');
+    }
+
+
+
     return;
   }
   if (command === 'render') {
@@ -153,6 +168,6 @@ async function main() {
 }
 main().catch(error => {
   // Never dump browser errors, request bodies, cookies or URLs with session identifiers.
-  console.error(error.code === 'EEXIST' ? '.env 已存在，保留原密钥。' : (error.code && error.name === 'PiuError' ? error.message : '操作失败，请检查命令参数、.env 配置、浏览器安装及网络。'));
+  console.error(error.code === 'EEXIST' ? 'config/config.yaml 已存在，保留原配置。' : (error.code && error.name === 'PiuError' ? error.message : '操作失败，请检查命令参数、config/config.yaml 配置、浏览器安装及网络。'));
   process.exitCode = 1;
 });

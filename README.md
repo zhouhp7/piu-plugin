@@ -14,7 +14,7 @@ npm run browser:install
 npm run setup
 ```
 
-编辑生成的 `.env` 后重启 Yunzai。二维码登录需将 `PIU_PUBLIC_URL` 配为手机可访问的 HTTPS 地址；[反向代理示例](deploy/nginx.conf)转发至 `127.0.0.1:3210`。Cookie 登录无需公开页面或反向代理。Linux 还需浏览器系统依赖和中文字体。
+首次运行可在锅巴后台（guoba-plugin）进行图形化配置，或编辑生成的 `config/config.yaml` 后重启 Yunzai（默认配置模板见 `defSet/config.yaml`）。二维码登录需将 `publicUrl` 配为手机可访问的 HTTPS 地址；[反向代理示例](deploy/nginx.conf)转发至 `127.0.0.1:3210`。Cookie 登录无需公开页面或反向代理。Linux 还需浏览器系统依赖和中文字体。
 
 ## 常用命令
 
@@ -55,7 +55,7 @@ npm run setup
 
 ## 配置与本地运行
 
-完整配置见 [`.env.example`](.env.example)。`PIU_DATA_DIR` 默认 `data/`，`PIU_BROWSER_PATH` 可指定 Chrome，`PIU_RANK_ENABLED` 控制每日采集；`setup` 自动生成会话密钥 `PIU_SESSION_KEY`。
+完整默认配置模板见 [`defSet/config.yaml`](defSet/config.yaml)，用户配置保存在 `config/config.yaml`（支持使用锅巴插件 `guoba-plugin` 进行可视化修改）。`dataDir` 默认 `data/`，`browserPath` 可指定 Chrome，`rankEnabled` 控制每日采集；`npm run setup` 或锅巴后台可自动生成 64 位会话加密密钥 `sessionKey`。
 
 ```sh
 node bin/piu.js login-local local
@@ -67,6 +67,6 @@ node bin/piu.js rank-daemon
 npm test
 ```
 
-更新时保留 `.env` 和 `data/`；备份会话须同时保留原密钥，发布源码时排除运行数据。
+更新插件时保留 `config/config.yaml` 和 `data/`；备份会话须同时保留原密钥，发布源码时排除运行数据。
 
 代码采用 MIT 许可，官网图片归各自权利人所有，详见 [第三方声明](THIRD_PARTY_NOTICES.md)。

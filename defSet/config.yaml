@@ -1,0 +1,61 @@
+# ===================================================================
+# PIU Plugin (Best50 & Ranking) 默认配置文件
+# 遵循 Yunzai 插件约定：请勿直接修改 defSet 目录下的文件。
+# 自定义配置请在 config/config.yaml 中修改，或通过锅巴后台管理界面进行修改。
+# ===================================================================
+
+# ----- 服务与网络设置 -----
+# 公开访问地址（用于扫码登录的回调访问地址。线上生产环境必须为 HTTPS，本地测试可用 http://localhost:3210）
+publicUrl: "http://localhost:3210"
+
+# 本地服务监听地址与端口
+host: "127.0.0.1"
+port: 3210
+
+# 代理地址（直连韩国官网若超时或受阻可配置，例如本机 Clash/Mihomo 代理 http://127.0.0.1:7890）
+proxy: ""
+
+# ----- 安全与凭证设置 -----
+# 64 位十六进制加密密钥（用于加密落盘的 PIU 会话和排行榜凭据。通过 npm run setup 自动生成，也可在锅巴中生成）
+sessionKey: ""
+
+# 扫码登录会话有效时间（秒，60 - 600）
+loginSeconds: 300
+
+# 允许同时进行的扫码登录并发数（1 - 10）
+maxLogins: 3
+
+# 允许同时抓取个人数据的最大任务数（1 - 8）
+maxFetches: 2
+
+# 缓存玩家个人数据的有效时长（秒，0 - 3600）
+cacheSeconds: 120
+
+# 登录凭证有效天数（天，1 - 90）
+sessionDays: 14
+
+# ----- 排行榜采集设置 -----
+# 是否启用每日排行榜定时快照守护（每日 GMT+8 01:00 保存全球前 1000 名完整快照）
+rankEnabled: true
+
+# 排行榜会话保活间隔（分钟，0 - 1440，填 0 关闭保活）
+rankKeepAliveMinutes: 20
+
+# 抓取失败后的重试次数（0 - 5，不含首次尝试）
+captureRetries: 2
+
+# 首次授权排行榜采集时预存的曲绘页数（0 - 20，填 0 关闭自动预存）
+jacketPrefetchPages: 3
+
+# 曲绘预存图片数量上限（1 - 500）
+jacketPrefetchImages: 120
+
+# ----- 浏览器与环境设置 -----
+# 自定义 Chrome / Chromium 可执行文件路径（已安装 Playwright Chromium 时请留空；或填写本机 Chrome 绝对路径）
+browserPath: ""
+
+# 浏览器通道（可选，例如 chrome、msedge 等）
+browserChannel: ""
+
+# 数据存储目录（默认为 data）
+dataDir: "data"
