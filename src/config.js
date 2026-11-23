@@ -17,6 +17,7 @@ export const FIELD_ENV_MAP = {
   maxFetches: 'PIU_MAX_FETCHES',
   cacheSeconds: 'PIU_CACHE_SECONDS',
   sessionDays: 'PIU_SESSION_DAYS',
+  keepAliveEnabled: 'PIU_KEEPALIVE_ENABLED',
   rankEnabled: 'PIU_RANK_ENABLED',
   rankKeepAliveMinutes: 'PIU_RANK_KEEPALIVE_MINUTES',
   captureRetries: 'PIU_RANK_CAPTURE_RETRIES',
@@ -126,6 +127,7 @@ export function loadConfig(env = process.env) {
     maxSessions: parseNumber(raw.maxLogins, 'PIU_MAX_LOGINS', 3, 1, 10),
     maxFetches: parseNumber(raw.maxFetches, 'PIU_MAX_FETCHES', 2, 1, 8),
     sessionMaxAgeMs: parseNumber(raw.sessionDays, 'PIU_SESSION_DAYS', 14, 1, 90) * 86400000,
+    keepAliveEnabled: parseBoolean(raw.keepAliveEnabled, 'PIU_KEEPALIVE_ENABLED', true),
     ...browserConfig(raw, env),
   };
 }

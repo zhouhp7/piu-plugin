@@ -73,6 +73,13 @@ export class PiuBest50 extends plugin {
       if (globalThis.logger?.warn) globalThis.logger.warn(`[PIU rank] ${error.message}`);
       else console.warn(`[PIU rank] ${error.message}`);
     }
+    try {
+      const s = await service();
+      await s.startKeepAlive?.();
+    } catch (error) {
+      if (globalThis.logger?.warn) globalThis.logger.warn(`[PIU keepalive] ${error.message}`);
+      else console.warn(`[PIU keepalive] ${error.message}`);
+    }
   }
   async help() {
     try { return await this.reply(image(await renderHelp())); }

@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 /** Encrypted session storage. Keep the key separate from backups and source control. */
@@ -28,8 +28,8 @@ export class Vault {
     finally { if (this.pending.get(id) === next) this.pending.delete(id); }
   }
 
-  async save(userKey, value) {
-    const id = this.identity(userKey);
+  async saveById(id, value) {
+    if (typeof id !== 'string' || !/^[a-f0-9]{64}$/i.test(id)) throw new TypeError('Invalid session id');
     const encoded = JSON.stringify(value);
     if (encoded === undefined) throw new TypeError('Session must be JSON serializable');
     return this.serialized(id, async () => {
@@ -48,8 +48,13 @@ export class Vault {
     });
   }
 
-  async load(userKey) {
+  async save(userKey, value) {
     const id = this.identity(userKey);
+    return this.saveById(id, value);
+  }
+
+  async loadById(id) {
+    if (typeof id !== 'string' || !/^[a-f0-9]{64}$/i.test(id)) throw new TypeError('Invalid session id');
     return this.serialized(id, async () => {
       let raw;
       try { raw = await readFile(this.file(id), 'utf8'); }
@@ -67,8 +72,30 @@ export class Vault {
     });
   }
 
+  async load(userKey) {
+    const id = this.identity(userKey);
+    return this.loadById(id);
+  }
+
+  async deleteById(id) {
+    if (typeof id !== 'string' || !/^[a-f0-9]{64}$/i.test(id)) throw new TypeError('Invalid session id');
+    return this.serialized(id, () => unlink(this.file(id)).catch(error => { if (error.code !== 'ENOENT') throw error; }));
+  }
+
   async delete(userKey) {
     const id = this.identity(userKey);
-    return this.serialized(id, () => unlink(this.file(id)).catch(error => { if (error.code !== 'ENOENT') throw error; }));
+    return this.deleteById(id);
+  }
+
+  async list() {
+    try {
+      const files = await readdir(this.directory);
+      return files
+        .filter(name => /^[a-f0-9]{64}\.json\.enc$/i.test(name))
+        .map(name => name.replace(/\.json\.enc$/i, ''));
+    } catch (error) {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    }
   }
 }

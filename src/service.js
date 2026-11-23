@@ -11,6 +11,8 @@ import { enrichProfileRanking } from './profile-ranking.js';
 import { renderPlayData } from './play-data.js';
 import { parseCookieState } from './cookies.js';
 import { accountBindings, mergeAccount, normalizeAccountProfiles } from './account-bindings.js';
+import { KeepAliveManager } from './keepalive.js';
+import { shanghaiDate } from './ranking-time.js';
 
 export async function createService(config, dependencies = {}) {
   const vault = dependencies.vault ?? new Vault({directory: path.join(config.dataDir, 'sessions'), key: config.key});
@@ -96,6 +98,7 @@ export async function createService(config, dependencies = {}) {
     });
     refreshed.profilesUpdatedAt = Date.now();
     reconcileDefault(merged);
+    merged.userKey = userKey;
     await vault.save(userKey, merged);
     clearUser(userKey);
   };
@@ -177,6 +180,49 @@ export async function createService(config, dependencies = {}) {
       return picture;
     });
   };
+  const keepAliveAccount = async (sessionId, accountId) => {
+    if (mutations.has(sessionId)) return { skipped: true, reason: 'busy' };
+    const bindings = await vault.loadById(sessionId);
+    if (!bindings?.accounts?.length) return { skipped: true, reason: 'no_accounts' };
+    const account = bindings.accounts.find(item => item.id === accountId);
+    if (!account) return { skipped: true, reason: 'account_not_found' };
+    if (account.authExpired) return { skipped: true, reason: 'auth_expired' };
+
+    const target = (account.gameIds ?? []).find(g => g.selected) || (account.gameIds ?? [])[0];
+    const selector = target ? (target.playerName || `${target.gameId}${target.tag}`) : '';
+    const cacheSelector = selector ? normalizeGameIdSelector(selector) : '';
+    const query = `keepalive:${sessionId}:${accountId}`;
+
+    return run(sessionId, query, async () => {
+      const type = imageTypes.b50;
+      let result;
+      try {
+        result = await type.fetch(browser, account.state, { gameId: cacheSelector });
+      } catch (error) {
+        if (error.code === 'AUTH_REQUIRED') {
+          account.authExpired = true;
+          await vault.saveById(sessionId, bindings);
+        }
+        throw error;
+      }
+      account.state = result.state;
+      account.profilesUpdatedAt = Date.now();
+      account.lastKeepAliveAt = Date.now();
+      account.lastKeepAliveDate = shanghaiDate(new Date());
+      account.authExpired = false;
+      await vault.saveById(sessionId, bindings);
+
+      try {
+        const profile = enrichProfileRanking(result.profile, { dataDir: config.dataDir });
+        const picture = await type.render(profile, { loadImage: url => result.images.get(url) ?? null });
+        const finalSelector = cacheSelector || normalizeGameIdSelector(profile.playerName || '');
+        const cacheKey = JSON.stringify(['b50', account.id, String(target?.id ?? finalSelector), finalSelector]);
+        rememberImage(bindings.userKey || sessionId, cacheKey, picture);
+      } catch {}
+
+      return { success: true, accountId, selector };
+    });
+  };
   const bridge = await (dependencies.createBridge ?? createBridge)({host: config.host, port: config.port, publicUrl: config.publicUrl,
     ttlMs: config.ttlMs, maxSessions: config.maxSessions,
     createLogin: (userKey, options) => browser.createLogin(options),
@@ -203,7 +249,20 @@ export async function createService(config, dependencies = {}) {
     for (const [key, value] of loginCallbacks) if (now >= value.expiresAt) loginCallbacks.delete(key);
   }, 60000);
   prune.unref();
+  const keepAliveManager = dependencies.keepAliveManager ?? new KeepAliveManager(
+    { keepAliveAccount: (sid, aid) => keepAliveAccount(sid, aid) },
+    vault,
+    config,
+    dependencies
+  );
   return {
+    keepAliveAccount,
+    startKeepAlive() {
+      keepAliveManager.start();
+    },
+    getKeepAliveStatus() {
+      return keepAliveManager.getStatus();
+    },
     async login(userKey, {onBoundSession} = {}) {
       if (pending.has(userKey) || mutations.has(userKey)) throw new PiuError('BUSY', '账号正在操作，请完成后再登录。');
       if (onBoundSession !== undefined && typeof onBoundSession !== 'function') throw new TypeError('onBoundSession must be a function');
@@ -312,6 +371,7 @@ export async function createService(config, dependencies = {}) {
       } finally { endMutation(userKey); }
     },
     async close() {
+      keepAliveManager.close();
       clearInterval(prune);
       loginCallbacks.clear();
       await bridge.close();

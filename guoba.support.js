@@ -144,6 +144,12 @@ export function supportGuoba() {
             placeholder: '14',
           },
         },
+        {
+          field: 'keepAliveEnabled',
+          label: '启用每日账号自动保活',
+          bottomHelpMessage: '每天 24 小时内随机时间为每个已绑定账号获取一次 Best50，保持官网登录会话有效（默认开启）',
+          component: 'Switch',
+        },
 
         // ==================== 排行榜采集设置 ====================
         {

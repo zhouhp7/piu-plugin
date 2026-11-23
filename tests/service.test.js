@@ -24,6 +24,10 @@ async function fixture(t, overrides = {}) {
     async load(key) { return structuredClone(records.get(key) ?? null); },
     async save(key, value) { calls.saves.push(key); records.set(key, structuredClone(value)); },
     async delete(key) { calls.deletes.push(key); records.delete(key); },
+    async loadById(id) { return structuredClone(records.get(id) ?? null); },
+    async saveById(id, value) { calls.saves.push(id); records.set(id, structuredClone(value)); },
+    async deleteById(id) { calls.deletes.push(id); records.delete(id); },
+    async list() { return Array.from(records.keys()); },
   };
   const service = await createService({dataDir: '/unused', cacheMs: 120000, maxFetches: 3, sessionMaxAgeMs: 86400000}, {
     vault, browser: {async close() {}, async context(saved) {
@@ -42,7 +46,10 @@ async function fixture(t, overrides = {}) {
     }, async revoke(key) { calls.revokes.push(key); }, async close() {}}; },
     fetchProfile: async (_browser, saved, {gameId}) => {
       calls.fetch.push(gameId);
-      if (overrides.onFetch) await overrides.onFetch(gameId);
+      if (overrides.onFetch) {
+        const custom = await overrides.onFetch(gameId, saved);
+        if (custom) return custom;
+      }
       return {profile: {label: `${saved.cookies[0].value}:${gameId || 'current'}`}, images: new Map(), state: saved};
     },
     fetchRecent: async (_browser, saved, {gameId}) => {
@@ -483,4 +490,46 @@ test('binding keeps an unknown legacy cache untouched until an explicit refresh 
   assert.equal(f.calls.ids,2);
   assert.equal(f.records.get('owner').accounts[0].authExpired,true);
   assert.equal((await f.service.best50('owner')).toString(),'second:SECOND#2222');
+});
+
+test('service.keepAliveAccount updates state, date, and handles auth expiration', async t => {
+  const records = new Map([['owner', {
+    version: 2,
+    userKey: 'owner',
+    accounts: [
+      { id: 'acc1', state: state('token1'), savedAt: Date.now(), gameIds: ids },
+      { id: 'acc2', state: state('token2'), savedAt: Date.now(), gameIds: secondIds },
+    ],
+  }]]);
+  const f = await fixture(t, {
+    records,
+    onFetch: async (gameId, saved) => {
+      if (saved.cookies[0].value === 'token2') throw new PiuError('AUTH_REQUIRED', 'expired');
+      return {
+        profile: { playerName: 'ZANTING#9403', pumbility: 1000, records: [] },
+        state: state('refreshed-token1'),
+        images: new Map(),
+      };
+    },
+  });
+
+  const sessionId = 'owner';
+
+  // 保活 acc1（正常成功）
+  const result1 = await f.service.keepAliveAccount(sessionId, 'acc1');
+  assert.equal(result1.success, true);
+  const savedRecord = f.records.get('owner');
+  assert.equal(savedRecord.accounts[0].state.cookies[0].value, 'refreshed-token1');
+  assert.ok(savedRecord.accounts[0].lastKeepAliveDate);
+  assert.ok(savedRecord.accounts[0].lastKeepAliveAt);
+  assert.equal(savedRecord.accounts[0].authExpired, false);
+
+  // 保活 acc2（返回 AUTH_REQUIRED，标记失效）
+  await assert.rejects(f.service.keepAliveAccount(sessionId, 'acc2'), { code: 'AUTH_REQUIRED' });
+  assert.equal(f.records.get('owner').accounts[1].authExpired, true);
+
+  // 再次保活已失效的 acc2 应直接跳过
+  const result2 = await f.service.keepAliveAccount(sessionId, 'acc2');
+  assert.equal(result2.skipped, true);
+  assert.equal(result2.reason, 'auth_expired');
 });

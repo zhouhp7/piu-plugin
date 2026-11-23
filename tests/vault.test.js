@@ -17,7 +17,9 @@ test('vault encrypts, persists, and deletes sessions without exposing identities
   await vault.save('qq:123456', state);
   const [name] = await readdir(directory);
   assert.match(name, /^[a-f0-9]{64}\.json\.enc$/);
-  assert.equal((await stat(path.join(directory, name))).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') {
+    assert.equal((await stat(path.join(directory, name))).mode & 0o777, 0o600);
+  }
   assert.ok(!(await readFile(path.join(directory, name), 'utf8')).includes('secret-session-token'));
   assert.deepEqual(await vault.load('qq:123456'), state);
   assert.deepEqual(await new Vault({ directory, key: '07'.repeat(32) }).load('qq:123456'), state);
@@ -40,4 +42,22 @@ test('delete waits for pending writes so unbind cannot resurrect an encrypted se
   await Promise.all([vault.save('user', { token: 'a' }), vault.save('user', { token: 'b' }), vault.delete('user')]);
   assert.equal(await vault.load('user'), null);
   assert.throws(() => new Vault({ directory: '.', key: 'bad' }), /32 bytes/);
+});
+
+test('vault supports list, loadById, saveById and deleteById', async t => {
+  const { vault } = await fixture(t);
+  assert.deepEqual(await vault.list(), []);
+  const id1 = vault.identity('user1');
+  const id2 = vault.identity('user2');
+  await vault.saveById(id1, { name: 'user1-data' });
+  await vault.saveById(id2, { name: 'user2-data' });
+  const ids = await vault.list();
+  assert.equal(ids.length, 2);
+  assert.ok(ids.includes(id1));
+  assert.ok(ids.includes(id2));
+  assert.deepEqual(await vault.loadById(id1), { name: 'user1-data' });
+  assert.deepEqual(await vault.loadById(id2), { name: 'user2-data' });
+  await vault.deleteById(id1);
+  assert.equal(await vault.loadById(id1), null);
+  assert.deepEqual(await vault.list(), [id2]);
 });
